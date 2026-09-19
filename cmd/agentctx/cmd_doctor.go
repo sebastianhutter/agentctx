@@ -18,12 +18,11 @@ var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Show resolved configuration, host detection and task resolution",
 	Long: `Print what agentctx has worked out about its own situation: where the vault
-is, which host it thinks it is running on, and which task it would attribute an
-entry to right now.
+is, which host it thinks it is running on, how to register it, and what the
+vault already holds.
 
-Host and task resolution are the two things that fail silently in normal use —
-an entry filed under the wrong task looks exactly like an entry filed correctly.
-This command is how you check without writing one.`,
+Which task an entry belongs to is never worked out here — it is an argument on
+every verb that writes.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := configPath
 		if path == "" {
@@ -57,26 +56,8 @@ This command is how you check without writing one.`,
 		fmt.Println("\nHost")
 		fmt.Printf("  detected:   %s\n", env.Host(cfg.Host))
 		fmt.Printf("  session:    %s\n", orUnset(env.Session()))
-		if uuid := env.KeplerTaskID(); uuid != "" {
-			fmt.Printf("  kepler:     %s\n", uuid)
-		} else {
-			fmt.Println("  kepler:     not running under Kepler")
-		}
-
-		bindings, err := identity.LoadBindings(cfg.ExpandedStateDir())
-		if err != nil {
-			return err
-		}
-		resolver := identity.NewResolver(env, bindings)
-
-		fmt.Println("\nTask resolution")
-		fmt.Printf("  worktree:   %s\n", orUnset(resolver.WorktreeRoot()))
-		if resolution, err := resolver.Resolve(""); err == nil {
-			fmt.Printf("  would use:  %s (%s)\n", resolution.TaskID, resolution.Via)
-		} else {
-			fmt.Printf("  would use:  nothing — %v\n", err)
-		}
-		fmt.Printf("  bindings:   %d recorded\n", len(bindings.Entries))
+		fmt.Println("  (stamped on entries written through a stdio server or this CLI;")
+		fmt.Println("   a shared SSE server uses the connected client's own name instead)")
 
 		printRegistration()
 

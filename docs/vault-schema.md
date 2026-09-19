@@ -104,7 +104,6 @@ title: Rework the network module
 project: proj
 repos:
     - acme/infrastructure
-kepler_task_id: <uuid>         # correlation only, when opened from a task runner
 created: 2026-09-19
 consolidated_through:          # log entries older than this are folded into the body
 ---

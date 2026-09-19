@@ -94,14 +94,17 @@ one.
 - **Nothing enters without provenance.** Every finding records where it came from
   and when. No wholesale copying from a tracker, a wiki or a search result.
 - **Projects are created deliberately, tasks lazily.** Never auto-create a project.
-- **Never infer identity from the working directory.** See the resolution chain in
-  the plan; a wrong guess attaches entries to the wrong task silently.
+- **The task is an argument, never a guess.** `task_id` is required on every verb
+  that writes. Do not reintroduce inference from the working directory, a state
+  file or a branch name: a wrong guess attaches entries to the wrong task
+  silently, and that is the one mistake here that cannot be detected or repaired.
+  See §10 of the implementation plan.
 - **stdout belongs to the MCP protocol.** All logging goes to stderr via
   `log/slog`. A stray `fmt.Println` corrupts a stdio session.
 - **The environment describes the caller only over stdio and the CLI.** The SSE
-  server is shared, so its working directory, `KEPLER_TASK_ID` and session id are
-  the menu bar app's. Anything reading them must go through `service.Transport`;
-  see §9 of the implementation plan.
+  server is shared, so its environment is the menu bar app's. Host and session
+  attribution therefore go through `service.Transport`; nothing else may read the
+  environment to decide something about the caller.
 
 ---
 

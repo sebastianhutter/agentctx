@@ -121,16 +121,14 @@ var openTaskTool = mcp.NewTool("open_task",
 	mcp.WithDescription(
 		"Call this before reading code. Returns everything already known about a task, the "+
 			"project it belongs to and the repositories it touches, plus the working agreement.\n\n"+
-			"Task id resolution, in order: the task_id argument, a binding recorded by an earlier "+
-			"open_task in this worktree or Kepler task, then a tracker key parsed out of the branch "+
-			"name. The branch is often named after the task title rather than an issue, so pass "+
-			"task_id when you know it.\n\n"+
+			"The task id is always given, never guessed: it is usually the tracker key in lower "+
+			"case, and it is the first line of what this returns, so later calls can quote it.\n\n"+
 			"On a task that does not exist yet, pass seed_title (and seed_source_key / seed_url / "+
 			"seed_repos when the task came from a tracker). This server holds no tracker credentials "+
 			"by design: look the issue up with your own tools and pass what you found. The task's "+
 			"first recorded fact is where it came from."),
-	mcp.WithString("task_id",
-		mcp.Description("Task id, e.g. \"proj-142\". Omit only if an earlier open_task bound this worktree.")),
+	mcp.WithString("task_id", mcp.Required(),
+		mcp.Description("Task id, e.g. \"proj-142\". Lower case; usually the tracker key.")),
 	mcp.WithString("project",
 		mcp.Description("Project id. Only needed when the task id carries no known key prefix.")),
 	mcp.WithString("seed_title",
@@ -151,8 +149,13 @@ func (h *handlers) openTask(ctx context.Context, request mcp.CallToolRequest) (*
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	taskID, err := request.RequireString("task_id")
+	if err != nil {
+		return mcp.NewToolResultError("task_id is required"), nil
+	}
+
 	req := service.OpenTaskRequest{
-		TaskID:  request.GetString("task_id", ""),
+		TaskID:  taskID,
 		Project: request.GetString("project", ""),
 	}
 	if title := request.GetString("seed_title", ""); title != "" {
@@ -189,8 +192,8 @@ var logDecisionTool = mcp.NewTool("log_decision",
 		mcp.Description("What was considered and dropped, each with the reason it lost.")),
 	mcp.WithArray("affected_repos", mcp.WithStringItems(),
 		mcp.Description("Repositories this decision changes.")),
-	mcp.WithString("task_id",
-		mcp.Description("Task id. Omit to use the task bound by open_task.")),
+	mcp.WithString("task_id", mcp.Required(),
+		mcp.Description("Task id, as passed to open_task.")),
 )
 
 func (h *handlers) logDecision(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -208,8 +211,13 @@ func (h *handlers) logDecision(ctx context.Context, request mcp.CallToolRequest)
 		return mcp.NewToolResultError("rationale is required"), nil
 	}
 
+	taskID, err := request.RequireString("task_id")
+	if err != nil {
+		return mcp.NewToolResultError("task_id is required (the one open_task printed)"), nil
+	}
+
 	entry, err := svc.LogDecision(service.LogDecisionRequest{
-		TaskID:               request.GetString("task_id", ""),
+		TaskID:               taskID,
 		Decision:             decision,
 		Rationale:            rationale,
 		AlternativesRejected: request.GetStringSlice("alternatives_rejected", nil),
@@ -250,8 +258,8 @@ var logFindingTool = mcp.NewTool("log_finding",
 		mcp.Description("Repository the finding is about. Required when scope=repo.")),
 	mcp.WithString("confidence", mcp.Enum(store.ConfidenceHigh, store.ConfidenceMedium, store.ConfidenceLow),
 		mcp.Description("Optional. Only honoured when lower than the level derived from source_kind.")),
-	mcp.WithString("target_id",
-		mcp.Description("Task id or project id. Omit to use the task bound by open_task.")),
+	mcp.WithString("target_id", mcp.Required(),
+		mcp.Description("Task id, or a project id when the finding is about the project as a whole.")),
 )
 
 func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -269,8 +277,13 @@ func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) 
 		return mcp.NewToolResultError("source_kind is required: a claim with no provenance cannot be re-verified"), nil
 	}
 
+	targetID, err := request.RequireString("target_id")
+	if err != nil {
+		return mcp.NewToolResultError("target_id is required: the task or project this is about"), nil
+	}
+
 	entry, err := svc.LogFinding(service.LogFindingRequest{
-		TargetID: request.GetString("target_id", ""),
+		TargetID: targetID,
 		Finding:  finding,
 		Source: store.Source{
 			Kind:      sourceKind,
@@ -304,8 +317,8 @@ var closeTaskTool = mcp.NewTool("close_task",
 			"knowing an avenue was a dead end is worth keeping."),
 	mcp.WithString("summary", mcp.Required(),
 		mcp.Description("What happened, and what the next person should know.")),
-	mcp.WithString("task_id",
-		mcp.Description("Task id. Omit to use the task bound by open_task.")),
+	mcp.WithString("task_id", mcp.Required(),
+		mcp.Description("Task id, as passed to open_task.")),
 )
 
 func (h *handlers) closeTask(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -319,8 +332,13 @@ func (h *handlers) closeTask(ctx context.Context, request mcp.CallToolRequest) (
 		return mcp.NewToolResultError("summary is required"), nil
 	}
 
+	taskID, err := request.RequireString("task_id")
+	if err != nil {
+		return mcp.NewToolResultError("task_id is required (the one open_task printed)"), nil
+	}
+
 	entry, err := svc.CloseTask(service.CloseTaskRequest{
-		TaskID:  request.GetString("task_id", ""),
+		TaskID:  taskID,
 		Summary: summary,
 	})
 	if err != nil {

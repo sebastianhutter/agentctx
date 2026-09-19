@@ -100,15 +100,14 @@ func (e Entry) Time() time.Time {
 // the moment it is stored; and last_opened/last_host, which are derived from the
 // opened entries in the log rather than written back on every call.
 type TaskNote struct {
-	ID           string   `yaml:"id"`
-	Source       string   `yaml:"source"`
-	SourceKey    string   `yaml:"source_key,omitempty"`
-	SourceURL    string   `yaml:"source_url,omitempty"`
-	Title        string   `yaml:"title,omitempty"`
-	Project      string   `yaml:"project"`
-	Repos        []string `yaml:"repos,omitempty"`
-	KeplerTaskID string   `yaml:"kepler_task_id,omitempty"`
-	Created      string   `yaml:"created"`
+	ID        string   `yaml:"id"`
+	Source    string   `yaml:"source"`
+	SourceKey string   `yaml:"source_key,omitempty"`
+	SourceURL string   `yaml:"source_url,omitempty"`
+	Title     string   `yaml:"title,omitempty"`
+	Project   string   `yaml:"project"`
+	Repos     []string `yaml:"repos,omitempty"`
+	Created   string   `yaml:"created"`
 
 	// ConsolidatedThrough marks how far the body has folded in the log. Entries
 	// newer than this are returned separately, so consolidation is compaction

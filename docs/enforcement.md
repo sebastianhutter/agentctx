@@ -29,7 +29,7 @@ the same words, at the moment the work is about to start.
 | A project is never invented | `open_project` required first | An auto-created project silently splits one corpus in two |
 | A session does not close empty | `close_task` refuses | A session that learned nothing worth recording is usually one that forgot to record it |
 | Confidence is not self-assessed | derived from `source_kind` | A model asked how sure it is says "very" |
-| The task is never guessed from the directory | resolution chain refuses | A wrong guess files work under the wrong task, and nobody notices for weeks |
+| The task is named on every write | `task_id` required by the schema | It used to be inferred. A wrong guess files work under the wrong task and nobody notices for weeks — and unlike everything else here, it cannot be found later or undone |
 
 Every refusal says what to do next. A refusal that only blocks is an obstacle;
 one that names the missing argument is a correction.

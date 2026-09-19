@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -28,22 +27,11 @@ func newService(t *testing.T, env map[string]string) *Service {
 		Confidence: config.ConfidenceConfig{DeriveFromSource: true},
 	}
 
-	fakeEnv := identity.Env{
-		Getenv: func(k string) string { return env[k] },
-		Getwd:  func() (string, error) { return vaultDir, nil },
-	}
-	bindings, err := identity.LoadBindings(stateDir)
-	if err != nil {
-		t.Fatalf("LoadBindings: %v", err)
-	}
+	fakeEnv := identity.Env{Getenv: func(k string) string { return env[k] }}
 	st := store.New(vaultDir)
 	s := &Service{
 		Config: cfg, Store: st, Assembly: bundle.New(st, 30),
-		Resolver: &identity.Resolver{
-			Env: fakeEnv, Bindings: bindings,
-			Git: func(string, ...string) (string, error) { return "", errors.New("no git in tests") },
-		},
-		Env: fakeEnv,
+		Env: fakeEnv, Transport: TransportStdio,
 	}
 	s.SetClock(func() time.Time { return now })
 	return s
@@ -93,7 +81,7 @@ func TestOpenProjectRefusesBlindCreation(t *testing.T) {
 }
 
 func TestOpenTaskCreatesFromSeed(t *testing.T) {
-	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid-1"})
+	s := newService(t, nil)
 	openProject(t, s)
 
 	b, err := s.OpenTask(OpenTaskRequest{
@@ -110,10 +98,6 @@ func TestOpenTaskCreatesFromSeed(t *testing.T) {
 	if !b.Created {
 		t.Error("OpenTask did not report creating the note")
 	}
-	if b.Task.KeplerTaskID != "uuid-1" {
-		t.Errorf("kepler_task_id = %q, want the env value", b.Task.KeplerTaskID)
-	}
-
 	// The first fact about a task is where it came from.
 	opened, err := s.Store.Entries("proj", store.EntryFilter{Task: "proj-142", Kinds: []string{store.KindOpened}})
 	if err != nil {
@@ -193,34 +177,6 @@ func TestOpenTaskDoesNotRewriteTheNote(t *testing.T) {
 	}
 	if len(opened) != 2 {
 		t.Errorf("got %d opened entries, want one per open", len(opened))
-	}
-}
-
-// After one explicit call, the binding makes the argument optional — which is
-// the whole point of bindings.json.
-func TestOpenTaskBindsSoLaterCallsNeedNoArgument(t *testing.T) {
-	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid-1"})
-	openProject(t, s)
-
-	if _, err := s.OpenTask(OpenTaskRequest{TaskID: "proj-142", Seed: &Seed{Title: "Example task"}}); err != nil {
-		t.Fatalf("OpenTask: %v", err)
-	}
-
-	entry, err := s.LogDecision(LogDecisionRequest{Decision: "chose B", Rationale: "cheaper"})
-	if err != nil {
-		t.Fatalf("LogDecision with no task id: %v", err)
-	}
-	if entry.Task != "proj-142" {
-		t.Errorf("entry.Task = %q, want the bound task", entry.Task)
-	}
-
-	// And the binding is on disk, so a fresh process finds it too.
-	data, err := os.ReadFile(filepath.Join(s.Config.ExpandedStateDir(), "bindings.json"))
-	if err != nil {
-		t.Fatalf("bindings not written: %v", err)
-	}
-	if !strings.Contains(string(data), "proj-142") {
-		t.Errorf("bindings.json = %s", data)
 	}
 }
 
@@ -391,38 +347,6 @@ func mustOpenTask(t *testing.T, s *Service) {
 	}
 }
 
-// Over SSE one long-lived server serves every client, so the process
-// environment is the menu bar app's rather than the caller's. Inferring a task
-// from it would attribute entries to whatever the desktop looked like — the
-// exact silent misfiling the identity design exists to prevent.
-func TestSSETransportRefusesEnvironmentResolution(t *testing.T) {
-	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid-of-the-desktop-session"})
-	openProject(t, s)
-	mustOpenTask(t, s)
-
-	// A binding exists now, and over stdio it would resolve with no argument.
-	if _, err := s.LogDecision(LogDecisionRequest{Decision: "d", Rationale: "r"}); err != nil {
-		t.Fatalf("stdio-style resolution should work: %v", err)
-	}
-
-	s.WithTransport(TransportSSE)
-
-	_, err := s.LogDecision(LogDecisionRequest{Decision: "d", Rationale: "r"})
-	if err == nil {
-		t.Fatal("LogDecision resolved a task from the environment over SSE")
-	}
-	if !strings.Contains(err.Error(), "task_id is required") {
-		t.Errorf("refusal does not say what to pass: %v", err)
-	}
-
-	// Explicit still works.
-	if _, err := s.LogDecision(LogDecisionRequest{
-		TaskID: "proj-142", Decision: "d", Rationale: "r",
-	}); err != nil {
-		t.Fatalf("explicit task id over SSE: %v", err)
-	}
-}
-
 // Host detection reads the environment, which over SSE belongs to the menu bar
 // app. The MCP client's declared name is the only thing that tells two
 // connected agents apart, so it has to win.
@@ -453,23 +377,6 @@ func TestSSETransportStampsTheClientAsHost(t *testing.T) {
 	}
 }
 
-// A task note created over SSE must not claim the menu bar app's Kepler id.
-func TestSSETransportDoesNotRecordTheServersKeplerTask(t *testing.T) {
-	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid-of-the-desktop-session"})
-	openProject(t, s)
-	s.WithTransport(TransportSSE)
-
-	b, err := s.OpenTask(OpenTaskRequest{
-		TaskID: "proj-150", Seed: &Seed{Title: "Example task"},
-	})
-	if err != nil {
-		t.Fatalf("OpenTask: %v", err)
-	}
-	if b.Task.KeplerTaskID != "" {
-		t.Errorf("kepler_task_id = %q, want empty — that uuid is the server's, not the caller's", b.Task.KeplerTaskID)
-	}
-}
-
 // The session id has the same problem as the host: over SSE the environment
 // holds the menu bar app's, which would be stamped on every client's entries.
 func TestSSETransportStampsTheCallersSession(t *testing.T) {
@@ -495,5 +402,29 @@ func TestSSETransportStampsTheCallersSession(t *testing.T) {
 	}
 	if entry.Session != "" {
 		t.Errorf("session = %q, want empty rather than the server's own", entry.Session)
+	}
+}
+
+// Every verb that writes needs the task named. The inference that used to fill
+// this in was removed because a wrong answer is undetectable, so the refusal
+// has to be real.
+func TestWritingVerbsRequireATaskID(t *testing.T) {
+	s := newService(t, nil)
+	openProject(t, s)
+	mustOpenTask(t, s)
+
+	if _, err := s.LogDecision(LogDecisionRequest{Decision: "d", Rationale: "r"}); err == nil {
+		t.Error("LogDecision accepted a call with no task id")
+	}
+	if _, err := s.CloseTask(CloseTaskRequest{Summary: "done"}); err == nil {
+		t.Error("CloseTask accepted a call with no task id")
+	}
+	if _, err := s.OpenTask(OpenTaskRequest{Seed: &Seed{Title: "x"}}); err == nil {
+		t.Error("OpenTask accepted a call with no task id")
+	}
+	if _, err := s.LogFinding(LogFindingRequest{
+		Finding: "f", Source: store.Source{Kind: store.SourceFile},
+	}); err == nil {
+		t.Error("LogFinding accepted a call with no target id")
 	}
 }

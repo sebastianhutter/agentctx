@@ -48,11 +48,12 @@ func TestToolSchemasEnforceTheContract(t *testing.T) {
 		}
 	}
 
-	// open_task must NOT require task_id: a bound worktree is the common case,
-	// and requiring it would make the SessionStart hook impossible.
-	if len(openTaskTool.InputSchema.Required) != 0 {
-		t.Errorf("open_task requires %v, but every argument is meant to be optional",
-			openTaskTool.InputSchema.Required)
+	// The seed fields stay optional — they are needed only when the note does
+	// not exist yet, and the service says so when it needs them.
+	for _, optional := range []string{"seed_title", "seed_source_key", "project"} {
+		if contains(openTaskTool.InputSchema.Required, optional) {
+			t.Errorf("open_task requires %q, which is only needed when creating a task", optional)
+		}
 	}
 }
 

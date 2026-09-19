@@ -19,13 +19,9 @@ KEPLER_WORKTREE_ID=            # empty in a multi-repo task — do not rely on i
 KEPLER_BREADCRUMB_DIR=…        # worktree→task store, keyed by a path hash
 ```
 
-Two consequences.
-
-**Task binding.** `KEPLER_TASK_ID` is stable across every session of a task, so
-one explicit `open_task` binds it and every later call in any session of that
-task resolves with no argument. It is a *correlation* key, not a task id: one
-Kepler task can cover several issues, so it is recorded in the task note as
-`kepler_task_id` and never used as the task's own identity.
+Of these, agentctx uses one. `KEPLER_TASK_ID` is read as a *signal that this is
+a task runner*, and nothing more — the task an entry belongs to is always an
+argument (see §10 of the implementation plan).
 
 **Host detection is free, and needed.** Claude Code inside Kepler and Claude Code
 on its own share a single `~/.claude/` MCP registration, so a hand-set
@@ -44,15 +40,15 @@ Kepler names the branch after the **task title** unless the task was created fro
 an issue. A real example: a task called "please review the notes in …" produces
 the branch `please-review-the-notes-in`.
 
-So the resolution chain puts the branch parse last, and when it does fire, the
-bundle says the id was guessed rather than given. Guessing silently is worse than
-refusing: the refusal costs one argument, the wrong guess costs weeks of entries
-filed under the wrong task.
+This is the observation that eventually removed task inference altogether. A
+parse that is usually absent and occasionally wrong is worse than no parse: the
+missing case costs one argument, the wrong case costs weeks of entries filed
+under the wrong task, discovered by accident if at all.
 
-## `git config --worktree` is not usable here
+## `git config --worktree` is not usable here, and neither is anything like it
 
-The obvious place to record a task binding is the worktree's git config. It does
-not work:
+Recorded for anyone tempted to store per-worktree state in git config, as an
+earlier version of this tool was:
 
 ```
 fatal: --worktree cannot be used with multiple working trees unless the config
@@ -60,12 +56,11 @@ extension worktreeConfig is enabled
 ```
 
 Enabling it writes `extensions.worktreeConfig` into the **shared** `.git/config` —
-agentctx mutating the user's repositories as a side effect of opening a task — and
-it still cannot express one Kepler task holding two worktrees.
+agentctx mutating the user's repositories as a side effect of opening a task —
+and it still cannot express one Kepler task holding two worktrees.
 
-agentctx uses `~/.agentctx/bindings.json` instead, keyed by both the Kepler task
-uuid and the absolute worktree path. No repo mutation, works outside git, works
-for multi-repo tasks, and deleting it costs one explicit argument.
+The eventual answer was not a better hiding place for the binding. It was to
+stop binding: the task id is passed in.
 
 ## Kepler already supplies the task's resources
 
@@ -100,5 +95,4 @@ it, both systems get half-written and neither gets read.
 ## Worktrees are disposable
 
 `discard_worktree` deletes the worktree *and* its branch. Anything stored inside a
-checkout dies with it — which is why the vault lives outside, and why
-`bindings.json` holds no knowledge worth keeping.
+checkout dies with it — which is why the vault lives outside the repository.

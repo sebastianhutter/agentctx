@@ -37,10 +37,6 @@ type TaskBundle struct {
 	// Created reports whether this call brought the task note into existence.
 	Created bool
 
-	// ResolvedVia says how the task id was arrived at, so "you told me" and
-	// "I guessed from a branch name" are not presented as the same thing.
-	ResolvedVia string
-
 	// Unconsolidated are the task's own entries not yet folded into the body.
 	Unconsolidated []Marked
 
@@ -246,9 +242,6 @@ func (b *TaskBundle) Render() string {
 	}
 	if len(b.Task.Repos) > 0 {
 		fmt.Fprintf(&out, "- repos: %s\n", strings.Join(b.Task.Repos, ", "))
-	}
-	if b.ResolvedVia != "" {
-		fmt.Fprintf(&out, "- resolved via: %s\n", b.ResolvedVia)
 	}
 	fmt.Fprintf(&out, "- note: %s\n", b.Task.ID+".md")
 

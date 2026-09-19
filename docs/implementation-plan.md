@@ -219,26 +219,27 @@ a host and a timestamp, not just the latest) and keeps a single writer per file.
 The task note becomes: written once at creation, then only by consolidation, which
 is single-writer by nature. Frontmatter mutation disappears from the hot path.
 
-### 4.4 Identity resolution
+### 4.4 Identity
 
-`task_id`, in order — first hit wins, no cwd inference ever:
+Two different questions, and only one of them is worked out here.
 
-1. explicit argument
-2. `bindings.json` lookup by `KEPLER_TASK_ID`
-3. `bindings.json` lookup by absolute worktree path
-4. Jira/GitLab key parsed from the branch name — best effort, often absent (§3.2)
-5. refuse, and say which of the above to supply
+**Which task is meant** is never inferred. It is a required argument on every
+verb that writes. An earlier version resolved it from a recorded binding, the
+worktree path, or a tracker key parsed out of the branch name; that is gone.
+See §10.
 
-On success with an explicit argument, record the binding for 2 and 3 so later calls
-in the same task need no argument.
+**Which host is writing** is detected, because it has no comparable failure
+mode — a mis-stamped host makes one number slightly wrong, where a mis-resolved
+task files work under the wrong heading and nobody notices. Over stdio and the
+CLI it comes from the environment (`AGENT_HOST`, else `KEPLER_TASK_ID` present
+means a task runner, else `CLAUDECODE`). Over the shared SSE server the
+environment is the menu bar app's, so the name the MCP client announced at
+`initialize` is used instead.
 
-`project`: from the task key prefix via `jira_projects` / `gitlab_groups` across the
-project notes. Unknown prefix, or a task with no key at all (a title-only Kepler
-task), requires an explicit `project` argument. **Projects are never auto-created** —
-refuse with "run `open_project` first".
-
-`host`: `AGENT_HOST` if set, else `kepler-claude-code` if `KEPLER_TASK_ID` is
-present, else `claude-code` if `CLAUDECODE` is set, else `unknown`.
+`project` is resolved from the task key prefix via `jira_projects` /
+`gitlab_groups` across the project notes. An unknown prefix, or a task with no
+key at all, requires an explicit `project` argument. **Projects are never
+auto-created** — refuse with "run `open_project` first".
 
 ### 4.5 Verbs
 
@@ -246,7 +247,7 @@ present, else `claude-code` if `CLAUDECODE` is set, else `unknown`.
 open_project(project_id, name?, jira_projects?, gitlab_groups?, repos?, confluence_spaces?)
     -> project bundle; creates the note if missing (args required on create)
 
-open_task(task_id?, project?, seed?{source, source_key, source_url, title, repos})
+open_task(task_id, project?, seed?{source, source_key, source_url, title, repos})
     -> task bundle + working agreement; creates the note if missing.
        On create, seed is required: the agent looks the issue up with whatever
        tracker MCP it has and passes the facts in. The task's first fact is
@@ -504,3 +505,40 @@ to scan while hdiutil is reading it. Measured directly — 25MB of random bytes
 images fine, the same bytes marked as an executable do not. `build-dmg.sh`
 therefore creates a read/write image, copies into the mounted volume with `cp`,
 detaches with retries, and converts. Slower by a second and reliable.
+
+
+---
+
+## 10. Removing the task resolution chain
+
+The chain — explicit argument, then a binding in `~/.agentctx/bindings.json`,
+then the worktree path, then a tracker key parsed out of the branch name — is
+gone. `task_id` is a required parameter on every verb that writes, and
+`log_finding` requires `target_id`.
+
+It was 484 lines including its tests, plus a state file, plus most of the
+transport-awareness added with the SSE server, and it existed to save an agent
+from repeating a string that `open_task` prints as the first line of its own
+output. Against that: the chain could attribute an entry to the wrong task with
+nothing looking wrong, which is the only failure this system can neither detect
+nor repair. Everything else it does is append-only and reviewable; a
+mis-resolved task is a fact filed under the wrong heading, found weeks later if
+at all.
+
+It was also already inert where it mattered. The shared SSE server — the way
+this is actually run — could never use the environment, because the environment
+belongs to the menu bar app. So the machinery served one transport, guarded by a
+second mechanism, to avoid one argument.
+
+The tool schema is the right place to say what a call needs. Every host reads it
+identically, a required field cannot be forgotten, and there is no inference to
+be wrong.
+
+What was lost with it: a `SessionStart` hook that could open the current task
+with no arguments. That was the one genuine use — a deterministic lookup at the
+start of a session for the strongest host. It can come back the moment it is
+wanted, as an explicit id in the hook command or a per-repo file naming the
+current task, without any of the guessing. The rest of the plan is unaffected:
+`AGENT_HOST` detection stays, `open_project` is unchanged, and no vault file
+changes except that task notes no longer carry `kepler_task_id`, which only ever
+existed to correlate with a binding.

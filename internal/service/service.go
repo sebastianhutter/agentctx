@@ -15,18 +15,17 @@ import (
 	"github.com/sebastianhutter/agentctx/internal/store"
 )
 
-// Transport says how the caller reached this process, which decides whether the
-// process environment describes the caller at all.
+// Transport says how the caller reached this process, which decides only one
+// thing: where the host recorded on an entry comes from.
 //
-// This is not a detail. Over stdio the host spawns one process per session, so
-// the working directory and KEPLER_TASK_ID belong to the agent doing the work,
-// and resolving a task from them is sound. Over SSE one long-lived server —
-// started by the menu bar app — serves every client, so its environment and
-// working directory are the *menu bar app's*. Resolving a task from them would
-// attribute an entry to whatever the desktop session happened to look like,
-// which is the silent-misfiling failure the whole identity design exists to
-// prevent. So over SSE the task id must be explicit, and the caller's identity
-// comes from the MCP session rather than from getenv.
+// Over stdio the host spawns one process per session, so the environment is the
+// agent's and detecting the host from it is right — and it is the only way to
+// tell Claude Code inside Kepler from Claude Code on its own, since they share
+// one registration. Over SSE one long-lived server serves every client, so its
+// environment is the menu bar app's; the name the client announced at
+// initialize is used instead.
+//
+// Which task is meant is never inferred from either. It is a required argument.
 type Transport string
 
 // Transports.
@@ -36,16 +35,11 @@ const (
 	TransportSSE   Transport = "sse"
 )
 
-// SharesCallerEnvironment reports whether this process's environment and
-// working directory describe the agent that is calling.
-func (t Transport) SharesCallerEnvironment() bool { return t != TransportSSE }
-
 // Service holds everything the verbs need.
 type Service struct {
 	Config   *config.Config
 	Store    *store.Store
 	Assembly *bundle.Assembler
-	Resolver *identity.Resolver
 	Env      identity.Env
 
 	// Transport decides whether the environment may be trusted to identify the
@@ -72,19 +66,12 @@ func New(cfg *config.Config) (*Service, error) {
 		return nil, fmt.Errorf("configuration: %w", errors.Join(errs...))
 	}
 
-	env := identity.OSEnv()
-	bindings, err := identity.LoadBindings(cfg.ExpandedStateDir())
-	if err != nil {
-		return nil, err
-	}
-
 	s := store.New(cfg.ExpandedVaultPath())
 	return &Service{
 		Config:    cfg,
 		Store:     s,
 		Assembly:  bundle.New(s, cfg.Stale.MaxAgeDays),
-		Resolver:  identity.NewResolver(env, bindings),
-		Env:       env,
+		Env:       identity.OSEnv(),
 		Transport: TransportCLI,
 		now:       time.Now,
 	}, nil
@@ -145,19 +132,22 @@ func (s *Service) host() string {
 	return s.Env.Host(s.Config.Host)
 }
 
-// resolveTask resolves a task id, refusing environment-based resolution when
-// the environment does not describe the caller.
-func (s *Service) resolveTask(explicit string) (identity.Resolution, error) {
-	if id := strings.TrimSpace(explicit); id != "" {
-		return identity.Resolution{TaskID: id, Via: "argument"}, nil
+// requireTaskID normalises the task id, which every verb that writes must be
+// given.
+//
+// There used to be a resolution chain here: a recorded binding, the worktree
+// path, a tracker key parsed out of the branch name. It is gone because of what
+// it was worth against what it risked. It saved an agent from repeating a
+// string that open_task had just printed at the top of its own output, and in
+// exchange it could attribute an entry to the wrong task without anything
+// looking wrong — the one mistake this system cannot detect or repair. A
+// required parameter cannot make it.
+func requireTaskID(explicit string) (string, error) {
+	id := strings.ToLower(strings.TrimSpace(explicit))
+	if id == "" {
+		return "", errors.New("task_id is required")
 	}
-	if !s.Transport.SharesCallerEnvironment() {
-		return identity.Resolution{}, fmt.Errorf("task_id is required over this transport: " +
-			"the server is shared between clients, so its working directory and environment " +
-			"describe the machine it runs on rather than your session. Pass task_id explicitly " +
-			"(a stdio registration can infer it; an SSE one cannot)")
-	}
-	return s.Resolver.Resolve("")
+	return id, nil
 }
 
 // --- open_project ---
@@ -248,11 +238,10 @@ type OpenTaskRequest struct {
 // time — and keeps a single writer per file, which is what makes parallel
 // sessions on a synced vault safe.
 func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
-	resolution, err := s.resolveTask(req.TaskID)
+	taskID, err := requireTaskID(req.TaskID)
 	if err != nil {
 		return nil, err
 	}
-	taskID := strings.ToLower(strings.TrimSpace(resolution.TaskID))
 
 	project, err := s.resolveProject(taskID, req)
 	if err != nil {
@@ -278,7 +267,6 @@ func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
 			ID: taskID, Project: project, Source: source,
 			SourceKey: req.Seed.SourceKey, SourceURL: req.Seed.SourceURL,
 			Title: req.Seed.Title, Repos: req.Seed.Repos,
-			KeplerTaskID: s.keplerTaskID(),
 		}
 		if err := s.Store.CreateTask(note); err != nil {
 			return nil, err
@@ -298,24 +286,11 @@ func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
 		return nil, err
 	}
 
-	// Bind so later calls in this worktree or Kepler task need no argument. A
-	// cache: failing to write it costs an explicit argument, not correctness.
-	//
-	// Skipped over SSE, where the worktree and Kepler id on offer are the menu
-	// bar app's: binding them would teach the cache a wrong answer, and a wrong
-	// binding is worse than none because it resolves silently.
-	if s.Transport.SharesCallerEnvironment() {
-		if err := s.Resolver.RememberTask(taskID); err != nil {
-			return nil, fmt.Errorf("record binding: %w", err)
-		}
-	}
-
 	b, err := s.Assembly.Task(project, taskID)
 	if err != nil {
 		return nil, err
 	}
 	b.Created = created
-	b.ResolvedVia = resolution.Via
 	return b, nil
 }
 
@@ -343,15 +318,6 @@ func (s *Service) resolveProject(taskID string, req OpenTaskRequest) (string, er
 		return "", fmt.Errorf("%w — pass project explicitly, or create it with open_project", err)
 	}
 	return project, nil
-}
-
-// keplerTaskID returns the Kepler task uuid when this process shares the
-// caller's environment, and nothing otherwise.
-func (s *Service) keplerTaskID() string {
-	if !s.Transport.SharesCallerEnvironment() {
-		return ""
-	}
-	return s.Env.KeplerTaskID()
 }
 
 func describeSeed(seed *Seed) string {
@@ -555,13 +521,12 @@ func (s *Service) CloseTask(req CloseTaskRequest) (*store.Entry, error) {
 	return entry, nil
 }
 
-// locateTask resolves a task id and finds the project holding it.
+// locateTask finds the project holding a task.
 func (s *Service) locateTask(explicit string) (taskID, project string, err error) {
-	resolution, err := s.resolveTask(explicit)
+	taskID, err = requireTaskID(explicit)
 	if err != nil {
 		return "", "", err
 	}
-	taskID = strings.ToLower(strings.TrimSpace(resolution.TaskID))
 
 	project, err = s.Store.FindTask(taskID)
 	if err != nil {

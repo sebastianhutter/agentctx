@@ -77,12 +77,11 @@ write path and no drift between what an agent sees and what you see.
 
 ## Register as an MCP server
 
-Two transports, and the choice matters more than it looks.
+Two transports.
 
-**stdio — prefer this where the host supports it.** Each host spawns its own
-process, which inherits the agent's working directory and environment, so
-`open_task` can work out which task is meant from a recorded binding or the
-branch name.
+**stdio.** Each host spawns its own process, which inherits the agent's
+environment — so the host recorded on an entry distinguishes a task runner from
+a plain session.
 
 ```json
 {
@@ -105,11 +104,10 @@ worktree, including one created by a task runner.
 http://localhost:31124/sse
 ```
 
-Convenient, and the only option for a host that cannot spawn a process. The
-catch: a server shared between clients sees no caller's working directory or
-environment, so **every call must pass `task_id`** — it cannot infer one, and it
-refuses rather than guessing. The host recorded on an entry comes from the MCP
-client's own name instead of the environment.
+Convenient, and the only option for a host that cannot spawn a process. One
+difference worth knowing: a shared server cannot see any caller's environment,
+so the host recorded on an entry comes from the MCP client's own name rather
+than from detection. Task ids are required either way.
 
 ## Vault layout
 
@@ -134,11 +132,11 @@ only by the consolidation pass — never by an agent.
   records more (every open, with host and time) and keeps one writer per file.
 - **Nothing enters without provenance.** Confidence is derived from the source kind
   rather than asserted; a caller may lower it, never raise it.
-- **Never infer the task from the working directory.** Resolution goes: explicit
-  argument, then a binding recorded by an earlier call, then a tracker key in the
-  branch name, then refuse. A branch is often named after a task title and carries
-  no key at all. Over the shared SSE server, where the environment belongs to the
-  menu bar app rather than the caller, inference is refused outright.
+- **The task is named, never inferred.** `task_id` is required on every verb that
+  writes. An earlier version guessed it from a binding, the working directory or
+  the branch name; that could file an entry against the wrong task with nothing
+  looking wrong, which is the only mistake here that is neither detectable nor
+  repairable. The tool schema is the right place to say what a call needs.
 
 ## Documentation
 
