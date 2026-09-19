@@ -71,6 +71,7 @@ agentctx open-task proj-142 --title "Rework the network module" \
 | `open_task` | What do we know about this task, its project and its repos? Creates the task note from a seed |
 | `log_decision` | A choice and why it was made. Rationale required |
 | `log_finding` | Something looked up and confirmed. Source required, scope chosen deliberately |
+| `log_dependency` | This task waits for those. Refuses loops and unknown ids |
 | `close_task` | Closes with a summary — and refuses if nothing was logged |
 
 Each is both an MCP tool and a CLI subcommand over the same core, so there is one
@@ -133,6 +134,10 @@ only by the consolidation pass — never by an agent.
   records more (every open, with host and time) and keeps one writer per file.
 - **Nothing enters without provenance.** Confidence is derived from the source kind
   rather than asserted; a caller may lower it, never raise it.
+- **Dependencies are events, not a field.** A closed blocker stops blocking by
+  itself, because the graph is folded out of the log rather than stored — no edge
+  to clear, nothing to go stale, and the ordering that used to apply stays
+  readable.
 - **The task is named, never inferred.** `task_id` is required on every verb that
   writes. An earlier version guessed it from a binding, the working directory or
   the branch name; that could file an entry against the wrong task with nothing

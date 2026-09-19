@@ -465,10 +465,12 @@ type Match struct {
 	Title   string
 	Project string // empty for a project match
 	Repos   []string
-	Open    bool   // tasks only
-	Why     string // what matched
-	Snippet string // one line of context when an entry matched
-	Entries int    // how much has been recorded against it
+	Open    bool     // tasks only
+	Ready   bool     // tasks only: open, with nothing unfinished in its way
+	Waiting []string // tasks only: the unfinished blockers
+	Why     string   // what matched
+	Snippet string   // one line of context when an entry matched
+	Entries int      // how much has been recorded against it
 }
 
 // SearchFilter narrows a search. All fields are optional; with none set,
@@ -482,6 +484,10 @@ type SearchFilter struct {
 
 	// IncludeClosed keeps tasks that have a closed entry.
 	IncludeClosed bool
+
+	// ReadyOnly drops tasks waiting on something unfinished — the "what can I
+	// actually start" question.
+	ReadyOnly bool
 
 	// Limit caps the results. Zero means a sensible default.
 	Limit int
@@ -527,6 +533,11 @@ func (s *Store) Search(filter SearchFilter) ([]Match, error) {
 		}
 
 		entries, err := s.Entries(projectID, EntryFilter{})
+		if err != nil {
+			return nil, err
+		}
+
+		graph, err := s.DependencyGraph(projectID)
 		if err != nil {
 			return nil, err
 		}
@@ -582,11 +593,17 @@ func (s *Store) Search(filter SearchFilter) ([]Match, error) {
 				task.ID, task.Title, task.SourceKey, taskBody,
 			}, task.Repos...), " "))
 
+			waiting := graph.OpenBlockers(taskID)
+			if filter.ReadyOnly && (len(waiting) > 0 || closed[taskID]) {
+				continue
+			}
+
 			why, snippet, ok := matchWhere(terms, haystack, byTask[taskID], "task")
 			if ok {
 				matches = append(matches, Match{
 					Kind: "task", ID: task.ID, Title: task.Title, Project: task.Project,
 					Repos: task.Repos, Open: !closed[taskID],
+					Ready: !closed[taskID] && len(waiting) == 0, Waiting: waiting,
 					Why: why, Snippet: snippet, Entries: len(byTask[taskID]),
 				})
 			}
@@ -598,6 +615,10 @@ func (s *Store) Search(filter SearchFilter) ([]Match, error) {
 	sort.SliceStable(matches, func(i, j int) bool {
 		if (matches[i].Kind == "project") != (matches[j].Kind == "project") {
 			return matches[i].Kind == "project"
+		}
+		// Work that can be started outranks work that cannot.
+		if matches[i].Kind == "task" && matches[i].Ready != matches[j].Ready {
+			return matches[i].Ready
 		}
 		if matches[i].Entries != matches[j].Entries {
 			return matches[i].Entries > matches[j].Entries

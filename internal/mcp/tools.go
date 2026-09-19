@@ -84,6 +84,8 @@ var findTool = mcp.NewTool("find",
 		mcp.Description("Words that must all appear. Omit to list everything.")),
 	mcp.WithString("repo",
 		mcp.Description("Restrict to projects and tasks touching this repository, e.g. \"acme/infrastructure\".")),
+	mcp.WithBoolean("ready_only",
+		mcp.Description("Only tasks that can be started now — nothing unfinished is waiting in their way.")),
 	mcp.WithBoolean("include_closed",
 		mcp.Description("Include closed tasks. Off by default — a closed task is rarely the one you want to log against.")),
 	mcp.WithNumber("limit",
@@ -100,6 +102,7 @@ func (h *handlers) find(ctx context.Context, request mcp.CallToolRequest) (*mcp.
 		Query:         request.GetString("query", ""),
 		Repo:          request.GetString("repo", ""),
 		IncludeClosed: request.GetBool("include_closed", false),
+		ReadyOnly:     request.GetBool("ready_only", false),
 		Limit:         request.GetInt("limit", 0),
 	}
 
@@ -349,6 +352,67 @@ func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) 
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("Logged %s-scoped finding on %s (confidence %s).\n%s",
 		entry.Scope, target, entry.Confidence, entry.Path)), nil
+}
+
+// --- log_dependency ---
+
+var logDependencyTool = mcp.NewTool("log_dependency",
+	mcp.WithDescription(
+		"Record that this task cannot proceed until others are done, or that it no longer "+
+			"waits for them.\n\n"+
+			"Worth a call the moment you discover an ordering — usually while reading code, not "+
+			"while planning. What it buys is that the next session, which will not have read what "+
+			"you just read, is told before it starts work it cannot finish.\n\n"+
+			"A dependency is an event, not a field: nothing is edited, and a blocker stops "+
+			"blocking by being closed, so a finished dependency never needs clearing. Pass "+
+			"resolved=true only when the ordering itself turns out to be wrong.\n\n"+
+			"Both tasks must already exist — open_task the other one first. An unknown id is a "+
+			"typo far more often than a real blocker, and a phantom blocker holds up work that "+
+			"nothing is actually waiting for. Loops are refused, because a cycle leaves no task "+
+			"that can be started first."),
+	mcp.WithString("task_id", mcp.Required(),
+		mcp.Description("The task that has to wait.")),
+	mcp.WithArray("depends_on", mcp.Required(), mcp.WithStringItems(),
+		mcp.Description("Task ids it waits for, e.g. [\"proj-139\"].")),
+	mcp.WithString("reason", mcp.Required(),
+		mcp.Description("Why this ordering exists. An ordering nobody can justify is one nobody can safely remove.")),
+	mcp.WithBoolean("resolved",
+		mcp.Description("Lift these edges instead of adding them — the ordering was wrong, not finished.")),
+)
+
+func (h *handlers) logDependency(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	svc, err := h.newService(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	taskID, err := request.RequireString("task_id")
+	if err != nil {
+		return mcp.NewToolResultError("task_id is required"), nil
+	}
+	dependsOn, err := request.RequireStringSlice("depends_on")
+	if err != nil {
+		return mcp.NewToolResultError("depends_on is required: name at least one task this one waits for"), nil
+	}
+	reason, err := request.RequireString("reason")
+	if err != nil {
+		return mcp.NewToolResultError("reason is required"), nil
+	}
+
+	entry, err := svc.LogDependency(service.LogDependencyRequest{
+		TaskID: taskID, DependsOn: dependsOn, Reason: reason,
+		Resolved: request.GetBool("resolved", false),
+	})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	verb := "now waits for"
+	if entry.Resolved {
+		verb = "no longer waits for"
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("%s %s %s.\n%s",
+		entry.Task, verb, strings.Join(entry.DependsOn, ", "), entry.Path)), nil
 }
 
 // --- close_task ---

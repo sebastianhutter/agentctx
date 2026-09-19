@@ -13,11 +13,12 @@ import (
 
 // Entry kinds.
 const (
-	KindOpened   = "opened"
-	KindDecision = "decision"
-	KindFinding  = "finding"
-	KindClosed   = "closed"
-	KindNote     = "note"
+	KindOpened     = "opened"
+	KindDecision   = "decision"
+	KindFinding    = "finding"
+	KindDependency = "dependency"
+	KindClosed     = "closed"
+	KindNote       = "note"
 )
 
 // Finding scopes. The scope decides what survives the task, which is the whole
@@ -78,6 +79,15 @@ type Entry struct {
 	Session    string  `yaml:"session,omitempty"`
 	Source     *Source `yaml:"source,omitempty"`
 	Confidence string  `yaml:"confidence,omitempty"`
+
+	// DependsOn lists tasks this one waits for, on a dependency entry.
+	DependsOn []string `yaml:"depends_on,omitempty"`
+
+	// Resolved marks a dependency entry that lifts the edges it names rather
+	// than declaring them. Dependencies are events, not a field: a blocker that
+	// no longer blocks is a new entry, never an edit, so how the order changed
+	// stays readable afterwards.
+	Resolved bool `yaml:"resolved,omitempty"`
 
 	// Body is the entry itself and is never part of the frontmatter.
 	Body string `yaml:"-"`

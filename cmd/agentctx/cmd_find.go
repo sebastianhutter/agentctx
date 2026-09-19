@@ -12,6 +12,7 @@ import (
 var (
 	findRepo          string
 	findIncludeClosed bool
+	findReadyOnly     bool
 	findLimit         int
 )
 
@@ -36,6 +37,7 @@ can surface the task where it was solved. It is not a semantic search.`,
 			Query:         strings.Join(args, " "),
 			Repo:          findRepo,
 			IncludeClosed: findIncludeClosed,
+			ReadyOnly:     findReadyOnly,
 			Limit:         findLimit,
 		}
 
@@ -51,6 +53,7 @@ can surface the task where it was solved. It is not a semantic search.`,
 func init() {
 	findCmd.Flags().StringVar(&findRepo, "repo", "", "Restrict to a repository")
 	findCmd.Flags().BoolVar(&findIncludeClosed, "include-closed", false, "Include closed tasks")
+	findCmd.Flags().BoolVar(&findReadyOnly, "ready", false, "Only tasks that can be started now")
 	findCmd.Flags().IntVar(&findLimit, "limit", 0, "Maximum results (default 20)")
 
 	rootCmd.AddCommand(findCmd)

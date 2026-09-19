@@ -157,6 +157,7 @@ type FindRequest struct {
 	Query         string
 	Repo          string
 	IncludeClosed bool
+	ReadyOnly     bool
 	Limit         int
 }
 
@@ -172,6 +173,7 @@ func (s *Service) Find(req FindRequest) ([]store.Match, error) {
 		Terms:         strings.Fields(req.Query),
 		Repo:          req.Repo,
 		IncludeClosed: req.IncludeClosed,
+		ReadyOnly:     req.ReadyOnly,
 		Limit:         req.Limit,
 	})
 }
@@ -206,8 +208,11 @@ func RenderMatches(matches []store.Match, req FindRequest) string {
 				fmt.Fprintf(&out, " — %s", m.Title)
 			}
 			fmt.Fprintf(&out, " (project `%s`", m.Project)
-			if !m.Open {
+			switch {
+			case !m.Open:
 				out.WriteString(", closed")
+			case len(m.Waiting) > 0:
+				fmt.Fprintf(&out, ", blocked by %s", strings.Join(m.Waiting, ", "))
 			}
 			out.WriteString(")")
 		}
@@ -535,6 +540,111 @@ func (s *Service) LogFinding(req LogFindingRequest) (*store.Entry, error) {
 		return nil, err
 	}
 	return entry, nil
+}
+
+// --- log_dependency ---
+
+// LogDependencyRequest records that a task waits for others, or no longer does.
+type LogDependencyRequest struct {
+	TaskID    string
+	DependsOn []string
+	Reason    string
+	Resolved  bool
+}
+
+// LogDependency appends a dependency entry.
+//
+// An event rather than a field on the task note. A stored blocked_by list is
+// wrong the moment a blocker is finished and nobody edits the note; an entry is
+// true forever about the moment it was written, and the current graph is folded
+// out of the log, where a closed blocker stops blocking on its own.
+func (s *Service) LogDependency(req LogDependencyRequest) (*store.Entry, error) {
+	taskID, project, err := s.locateTask(req.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	if len(req.DependsOn) == 0 {
+		return nil, errors.New("depends_on is required: name at least one task this one waits for")
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		return nil, errors.New("reason is required: an ordering nobody can justify is one nobody can " +
+			"safely remove later")
+	}
+
+	graph, err := s.Store.DependencyGraph(project)
+	if err != nil {
+		return nil, err
+	}
+
+	deps := make([]string, 0, len(req.DependsOn))
+	for _, raw := range req.DependsOn {
+		dep := strings.ToLower(strings.TrimSpace(raw))
+		if dep == "" {
+			continue
+		}
+		if dep == taskID {
+			return nil, fmt.Errorf("%s cannot depend on itself", taskID)
+		}
+
+		// An unknown id is a typo far more often than it is a real blocker, and
+		// a phantom one blocks work that nothing is actually waiting for. Open
+		// it first: it needs a title anyway, and then there is somewhere for
+		// what you learn about it to go.
+		depProject, err := s.Store.FindTask(dep)
+		if err != nil {
+			return nil, fmt.Errorf("no task %q in the vault: open_task it first, "+
+				"so a mistyped id cannot block this work forever", dep)
+		}
+		if depProject != project {
+			return nil, fmt.Errorf("task %q belongs to project %q, not %q: "+
+				"dependencies across projects are not modelled", dep, depProject, project)
+		}
+
+		if !req.Resolved {
+			if cycle := graph.WouldCycle(taskID, dep); cycle != nil {
+				return nil, fmt.Errorf("that would make a loop: %s. "+
+					"A cycle leaves no task that can be started first — record what actually "+
+					"blocks what, or resolve the edge going the other way",
+					store.FormatCycle(cycle))
+			}
+			// Take the new edge into account for the rest of this call, so two
+			// dependencies added at once cannot form a loop between them.
+			graph.BlockedBy[taskID] = append(graph.BlockedBy[taskID], dep)
+		}
+		deps = append(deps, dep)
+	}
+	if len(deps) == 0 {
+		return nil, errors.New("depends_on is required: name at least one task this one waits for")
+	}
+
+	var body strings.Builder
+	if req.Resolved {
+		fmt.Fprintf(&body, "No longer waiting for %s.\n\n", wikilinks(deps))
+	} else {
+		fmt.Fprintf(&body, "Waits for %s.\n\n", wikilinks(deps))
+	}
+	body.WriteString(strings.TrimSpace(req.Reason) + "\n")
+
+	entry := &store.Entry{
+		Kind: store.KindDependency, Task: taskID, Project: project, Scope: store.ScopeTask,
+		Host: s.host(), Session: s.session(),
+		DependsOn: deps, Resolved: req.Resolved,
+		Body: body.String(),
+	}
+	if _, err := s.Store.Append(entry); err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
+// wikilinks renders task ids as Obsidian links, so the vault's own graph view
+// shows the ordering without anything else being built.
+func wikilinks(ids []string) string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, "[["+id+"]]")
+	}
+	return strings.Join(out, ", ")
 }
 
 // --- close_task ---

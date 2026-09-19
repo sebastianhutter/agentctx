@@ -244,7 +244,7 @@ auto-created** — refuse with "run `open_project` first".
 ### 4.5 Verbs
 
 ```
-find(query?, repo?, include_closed?, limit?)
+find(query?, repo?, ready_only?, include_closed?, limit?)
     -> project and task ids, with why each matched. Never their contents.
 
 open_project(project_id, name?, jira_projects?, gitlab_groups?, repos?, confluence_spaces?)
@@ -580,3 +580,64 @@ Two details worth keeping:
 - **`opened` entries are not searched.** Their bodies are boilerplate this tool
   wrote itself, containing the host name — searching them would make every task
   match a query for `kepler`, confidently and uselessly.
+
+
+---
+
+## 12. Task dependencies
+
+The original notes had `blocked_by` in the task note frontmatter and then took
+it out, with a reason that still holds:
+
+> Gone: `status`, `mrs`, `blocked_by`. All three are **fetched live** by
+> `open_task`, never stored. Stored state drifts; a fetch does not.
+
+Then D4 removed the fetch, and dependencies ended up neither stored nor fetched
+— a gap made by two decisions that were each right on their own, the same shape
+as the discovery gap `find` fills.
+
+**Dependencies are events, not a field.** `log_dependency` appends an entry
+naming what a task waits for and why; the current graph is folded out of the log
+the same way open/closed already is. That answers the drift objection rather
+than ignoring it:
+
+- A **closed blocker stops blocking by itself.** Nobody has to remember to clear
+  an edge, which is exactly what a stored `blocked_by` list would require and
+  would not get.
+- **A change of mind is a later entry.** `resolved: true` lifts an edge without
+  editing anything, and the ordering that used to apply stays readable.
+- **The reason is required.** An ordering nobody can justify is one nobody can
+  safely remove later, and "why is this blocked" is the question a future
+  session actually has.
+
+### What it refuses
+
+- **Unknown task ids.** A mistyped blocker holds up work that nothing is
+  actually waiting for, and the typo is invisible. `open_task` it first — it
+  needs a title anyway, and then there is somewhere for what you learn about it
+  to go.
+- **Cycles**, with the path named: `proj-1 → proj-3 → proj-2 → proj-1`. A loop
+  leaves no task that can be started first, so "work in the right order" becomes
+  unanswerable. Cheaper to reject the edge than to explain the deadlock later.
+- **Self-dependency**, and edges across projects, which are not modelled.
+
+### Where it shows up
+
+- `open_task` leads with **⚠ Blocked** and the unfinished blockers, before
+  anything else about the task — starting blocked work is the expensive mistake
+  this exists to prevent. Once a blocker closes it moves to a quieter
+  "waited for: … (closed)" line, so the history survives the unblocking.
+- `open_project` splits open work into **Ready to start** and **Blocked**.
+  Separated rather than filtered, because "nothing to do" and "nothing you can
+  do yet" call for different responses.
+- `find --ready` / `ready_only` lists only what can be started now, and ready
+  tasks sort above blocked ones everywhere else.
+
+### Obsidian
+
+The entry body names its blockers as `[[proj-139]]` wikilinks, so the vault's
+own graph view shows the ordering with nothing else built. A Bases view can
+filter the `log/` folder on `kind: dependency` and `resolved`. Folding the
+current blockers into the task note's frontmatter — which is what Bases would
+want for a ready-queue over tasks — belongs to the consolidation pass, since
+that is the only thing allowed to rewrite a note.

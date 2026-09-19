@@ -89,6 +89,10 @@ one.
 - **Append-only.** Agents never edit an existing file; they append a new one. The
   vault is on a file-sync service with last-write-wins and no locking, and parallel
   sessions are normal. Two writers must produce two files, never one corruption.
+- **Derived state is never stored.** Open/closed, and which tasks block which,
+  are folded out of the log on read. A stored copy needs clearing when reality
+  changes and will not get it — that is why `status` and `blocked_by` are not
+  fields.
 - **The log is the source of truth.** Note bodies are consolidated views, rewritten
   only by the consolidation pass. Log entries are never edited or deleted.
 - **Nothing enters without provenance.** Every finding records where it came from

@@ -31,7 +31,7 @@ The only thing an agent writes. One file per entry, never edited, never deleted.
 
 ```yaml
 ---
-kind: finding                  # opened | decision | finding | closed | note
+kind: finding                  # opened | decision | finding | dependency | closed | note
 task: proj-142                 # absent on a project-scoped entry with no task
 project: proj
 scope: repo                    # task | repo | project
@@ -89,6 +89,35 @@ Computed from dates alone, since agentctx makes no network calls:
 
 A `file` finding returns its stored `ref`, so an agent that cares can compare the
 commit with HEAD itself in one command.
+
+## Dependency entry
+
+An ordering between tasks, in the same append-only log:
+
+```yaml
+---
+kind: dependency
+task: proj-211                 # the task that waits
+project: proj
+scope: task
+ts: 2026-09-19T15:03:03
+host: kepler-claude-code
+depends_on:
+    - proj-210
+resolved:                      # true lifts these edges instead of adding them
+---
+
+Waits for [[proj-210]].
+
+The VPC cannot be added until the module exposes per-environment inputs
+```
+
+The current graph is folded out of these, last entry per pair winning, with
+closed tasks treated as no longer blocking. Nothing stores a `blocked_by` list:
+it would need clearing every time a blocker finished, and would not get it.
+
+The `[[wikilinks]]` are what make the ordering visible in Obsidian's own graph
+view without anything else being built.
 
 ## Task note
 

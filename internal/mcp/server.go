@@ -55,7 +55,11 @@ HOW TO USE IT
    findings of its own — so a session that only reads can still write back what
    it confirmed.
 
-6. find returns places to look, never their contents: ids, titles and why each
+6. log_dependency records that a task waits for another. open_task then warns a
+   later session before it starts work it cannot finish, and find --ready_only
+   lists what can actually be started.
+
+7. find returns places to look, never their contents: ids, titles and why each
    matched. It searches logged text too, so a query describing a problem can
    surface the task where it was solved — then open that task to read it.
 
@@ -85,6 +89,7 @@ func CreateServer(configPath, version string, transport service.Transport) *serv
 		server.ServerTool{Tool: openTaskTool, Handler: h.openTask},
 		server.ServerTool{Tool: logDecisionTool, Handler: h.logDecision},
 		server.ServerTool{Tool: logFindingTool, Handler: h.logFinding},
+		server.ServerTool{Tool: logDependencyTool, Handler: h.logDependency},
 		server.ServerTool{Tool: closeTaskTool, Handler: h.closeTask},
 	)
 

@@ -37,6 +37,18 @@ type TaskBundle struct {
 	// Created reports whether this call brought the task note into existence.
 	Created bool
 
+	// OpenBlockers are tasks this one is waiting for that are not closed yet.
+	// First thing rendered when non-empty: starting blocked work is the
+	// expensive mistake this graph exists to prevent.
+	OpenBlockers []string
+
+	// ClosedBlockers were blockers once and are done, kept so the ordering that
+	// was recorded is still visible.
+	ClosedBlockers []string
+
+	// Blocks are the tasks waiting for this one.
+	Blocks []string
+
 	// Unconsolidated are the task's own entries not yet folded into the body.
 	Unconsolidated []Marked
 
@@ -53,7 +65,19 @@ type ProjectBundle struct {
 	Created     bool
 	Findings    []Marked
 	RepoNotes   map[string][]Marked
-	OpenTasks   []string
+
+	// OpenTasks are the ones that can be started now.
+	OpenTasks []string
+
+	// BlockedTasks are open but waiting. Separated rather than filtered out:
+	// "nothing to do" and "nothing you can do yet" call for different responses.
+	BlockedTasks []BlockedTask
+}
+
+// BlockedTask is an open task waiting for others.
+type BlockedTask struct {
+	ID      string
+	Waiting []string
 }
 
 // Assembler builds bundles from a store.
@@ -84,6 +108,19 @@ func (a *Assembler) Task(project, taskID string) (*TaskBundle, error) {
 		Project: projectNote, ProjectBody: projectBody,
 		RepoFindings: map[string][]Marked{},
 	}
+
+	graph, err := a.Store.DependencyGraph(project)
+	if err != nil {
+		return nil, err
+	}
+	for _, dep := range graph.BlockedBy[taskID] {
+		if graph.Closed[dep] {
+			b.ClosedBlockers = append(b.ClosedBlockers, dep)
+		} else {
+			b.OpenBlockers = append(b.OpenBlockers, dep)
+		}
+	}
+	b.Blocks = graph.Blocks[taskID]
 
 	// Entries the body has already absorbed are represented by the body, so
 	// only what came after it is returned separately. Consolidation is
@@ -155,13 +192,9 @@ func (a *Assembler) Project(projectID string) (*ProjectBundle, error) {
 
 	// Open tasks: every task note with no closed entry. Derived, never stored —
 	// a stored status drifts, and this costs one directory walk.
-	closed := map[string]bool{}
-	closedEntries, err := a.Store.Entries(projectID, store.EntryFilter{Kinds: []string{store.KindClosed}})
+	graph, err := a.Store.DependencyGraph(projectID)
 	if err != nil {
 		return nil, err
-	}
-	for _, e := range closedEntries {
-		closed[e.Task] = true
 	}
 
 	tasks, err := a.Store.ListTasks(projectID)
@@ -169,11 +202,17 @@ func (a *Assembler) Project(projectID string) (*ProjectBundle, error) {
 		return nil, err
 	}
 	for _, id := range tasks {
-		if !closed[id] {
-			b.OpenTasks = append(b.OpenTasks, id)
+		if graph.Closed[id] {
+			continue
 		}
+		if blockers := graph.OpenBlockers(id); len(blockers) > 0 {
+			b.BlockedTasks = append(b.BlockedTasks, BlockedTask{ID: id, Waiting: blockers})
+			continue
+		}
+		b.OpenTasks = append(b.OpenTasks, id)
 	}
 	sort.Strings(b.OpenTasks)
+	sort.Slice(b.BlockedTasks, func(i, j int) bool { return b.BlockedTasks[i].ID < b.BlockedTasks[j].ID })
 
 	return b, nil
 }
@@ -232,6 +271,15 @@ func (b *TaskBundle) Render() string {
 		fmt.Fprintf(&out, "\n%s\n", b.Task.Title)
 	}
 
+	// Before anything else that is known about the task: if it cannot be
+	// started, that is what the next tool call should be about.
+	if len(b.OpenBlockers) > 0 {
+		fmt.Fprintf(&out, "\n## ⚠ Blocked\n\nWaiting for %s.\n",
+			strings.Join(b.OpenBlockers, ", "))
+		out.WriteString("Those are not closed yet. Open one to see where it stands, " +
+			"or log_dependency with resolved to lift the edge if it no longer applies.\n")
+	}
+
 	out.WriteString("\n## Task\n\n")
 	fmt.Fprintf(&out, "- project: %s\n", b.Task.Project)
 	if b.Task.SourceKey != "" {
@@ -242,6 +290,12 @@ func (b *TaskBundle) Render() string {
 	}
 	if len(b.Task.Repos) > 0 {
 		fmt.Fprintf(&out, "- repos: %s\n", strings.Join(b.Task.Repos, ", "))
+	}
+	if len(b.ClosedBlockers) > 0 {
+		fmt.Fprintf(&out, "- waited for: %s (closed)\n", strings.Join(b.ClosedBlockers, ", "))
+	}
+	if len(b.Blocks) > 0 {
+		fmt.Fprintf(&out, "- blocks: %s\n", strings.Join(b.Blocks, ", "))
 	}
 	fmt.Fprintf(&out, "- note: %s\n", b.Task.ID+".md")
 
@@ -317,11 +371,22 @@ func (b *ProjectBundle) Render() string {
 	}
 
 	if len(b.OpenTasks) > 0 {
-		out.WriteString("\n## Open tasks\n\n")
+		out.WriteString("\n## Ready to start\n\n")
 		for _, id := range b.OpenTasks {
 			fmt.Fprintf(&out, "- %s\n", id)
 		}
-		out.WriteString("\nDerived from the log, not stored: a task is open until a closed entry exists.\n")
+	}
+
+	if len(b.BlockedTasks) > 0 {
+		out.WriteString("\n## Blocked\n\n")
+		for _, t := range b.BlockedTasks {
+			fmt.Fprintf(&out, "- %s — waiting for %s\n", t.ID, strings.Join(t.Waiting, ", "))
+		}
+	}
+
+	if len(b.OpenTasks) > 0 || len(b.BlockedTasks) > 0 {
+		out.WriteString("\nBoth lists are folded out of the log, not stored: a task is open until a " +
+			"closed entry exists, and a blocker stops blocking when it closes.\n")
 	}
 
 	return out.String()

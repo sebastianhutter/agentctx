@@ -428,3 +428,97 @@ func TestWritingVerbsRequireATaskID(t *testing.T) {
 		t.Error("LogFinding accepted a call with no target id")
 	}
 }
+
+func TestLogDependency(t *testing.T) {
+	s := newService(t, nil)
+	openProject(t, s)
+	mustOpenTask(t, s)
+	if _, err := s.OpenTask(OpenTaskRequest{TaskID: "proj-139", Seed: &Seed{Title: "The prerequisite"}}); err != nil {
+		t.Fatalf("OpenTask: %v", err)
+	}
+
+	t.Run("records the ordering with wikilinks", func(t *testing.T) {
+		entry, err := s.LogDependency(LogDependencyRequest{
+			TaskID: "proj-142", DependsOn: []string{"proj-139"},
+			Reason: "The module has to be split first",
+		})
+		if err != nil {
+			t.Fatalf("LogDependency: %v", err)
+		}
+		// The wikilink is what gives the vault its own graph view for free.
+		if !strings.Contains(entry.Body, "[[proj-139]]") {
+			t.Errorf("body has no wikilink: %q", entry.Body)
+		}
+		if !strings.Contains(entry.Body, "split first") {
+			t.Errorf("body lost the reason: %q", entry.Body)
+		}
+	})
+
+	t.Run("requires a reason", func(t *testing.T) {
+		_, err := s.LogDependency(LogDependencyRequest{
+			TaskID: "proj-142", DependsOn: []string{"proj-139"},
+		})
+		if err == nil {
+			t.Error("accepted an ordering with no justification")
+		}
+	})
+
+	// A mistyped id would block work that nothing is actually waiting for.
+	t.Run("refuses an unknown blocker", func(t *testing.T) {
+		_, err := s.LogDependency(LogDependencyRequest{
+			TaskID: "proj-142", DependsOn: []string{"proj-999"}, Reason: "typo",
+		})
+		if err == nil || !strings.Contains(err.Error(), "open_task it first") {
+			t.Errorf("LogDependency returned %v, want a refusal naming the fix", err)
+		}
+	})
+
+	t.Run("refuses a loop", func(t *testing.T) {
+		_, err := s.LogDependency(LogDependencyRequest{
+			TaskID: "proj-139", DependsOn: []string{"proj-142"}, Reason: "circular",
+		})
+		if err == nil || !strings.Contains(err.Error(), "loop") {
+			t.Errorf("LogDependency returned %v, want a cycle refusal", err)
+		}
+	})
+
+	t.Run("refuses self-dependency", func(t *testing.T) {
+		_, err := s.LogDependency(LogDependencyRequest{
+			TaskID: "proj-142", DependsOn: []string{"proj-142"}, Reason: "nonsense",
+		})
+		if err == nil {
+			t.Error("a task was allowed to depend on itself")
+		}
+	})
+}
+
+// The bundle has to warn before it informs: starting blocked work is the
+// expensive mistake the ordering exists to prevent.
+func TestBundleWarnsWhenBlocked(t *testing.T) {
+	s := newService(t, nil)
+	openProject(t, s)
+	mustOpenTask(t, s)
+	if _, err := s.OpenTask(OpenTaskRequest{TaskID: "proj-139", Seed: &Seed{Title: "The prerequisite"}}); err != nil {
+		t.Fatalf("OpenTask: %v", err)
+	}
+	if _, err := s.LogDependency(LogDependencyRequest{
+		TaskID: "proj-142", DependsOn: []string{"proj-139"}, Reason: "order",
+	}); err != nil {
+		t.Fatalf("LogDependency: %v", err)
+	}
+
+	b, err := s.OpenTask(OpenTaskRequest{TaskID: "proj-142"})
+	if err != nil {
+		t.Fatalf("OpenTask: %v", err)
+	}
+	if len(b.OpenBlockers) != 1 {
+		t.Fatalf("OpenBlockers = %v, want one", b.OpenBlockers)
+	}
+	out := b.Render()
+	if !strings.Contains(out, "Blocked") || !strings.Contains(out, "proj-139") {
+		t.Errorf("the bundle does not lead with the blocker:\n%s", out)
+	}
+	if strings.Index(out, "Blocked") > strings.Index(out, "## Task") {
+		t.Error("the blocker is reported after the task details rather than before")
+	}
+}
