@@ -295,7 +295,16 @@ var logFindingTool = mcp.NewTool("log_finding",
 		mcp.Description("What is true, stated so it makes sense to someone who was not here.")),
 	mcp.WithString("source_kind", mcp.Required(),
 		mcp.Enum(store.SourceKinds()...),
-		mcp.Description("Where it came from. file = source at a commit; inferred = reasoned, not verified.")),
+		mcp.Description("Where it came from, strongest first.\n"+
+			"file — source code at a commit; the only kind that can be re-read exactly.\n"+
+			"gitlab-mr, jira — a diff or an issue.\n"+
+			"document — anything you can open again at a named place: a vault note, a PDF, a "+
+			"spec, a plan. Ranks below file on purpose, because a plan describing code is only "+
+			"as good as the code it was written from — cite the code when you have it.\n"+
+			"confluence — a wiki page, which changes under you.\n"+
+			"web — a URL, which rots, paywalls or changes with no version.\n"+
+			"slack, conversation — someone said so; unrecheckable later.\n"+
+			"inferred — reasoned, not verified. Never presented as fact.")),
 	mcp.WithString("source_ref",
 		mcp.Description("Pointer into the source. For source_kind=file this must pin a commit — "+
 			"\"modules/vpc/main.tf@abc1234\", not \"@origin/main\", which moves and leaves the finding "+

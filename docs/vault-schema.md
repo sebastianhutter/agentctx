@@ -40,7 +40,7 @@ ts: 2026-09-19T14:32:07
 host: kepler-claude-code
 session: 077cbc02-…            # host session id, when the host exposes one
 source:                        # required on findings
-    kind: file                 # file | gitlab-mr | jira | confluence | slack | conversation | inferred
+    kind: file                 # see the table below
     ref: modules/network/main.tf@abc1234
     retrieved: 2026-09-19
 confidence: high               # derived from source.kind
@@ -75,9 +75,20 @@ ignored.
 | Source kind | Derived | Why |
 |---|---|---|
 | `file`, `gitlab-mr` | high | names a commit or a diff, so it can be re-checked exactly |
-| `jira`, `confluence` | medium | a real document, but one that changes under you |
-| `slack`, `conversation` | low | someone said so |
+| `jira` | medium | a real record, but one that changes under you |
+| `document` | medium | anything you can open again at a named place: a vault note, a PDF, a spec, a plan. Ranks below `file` because a plan describing code is only as good as the code it was written from |
+| `confluence` | medium | a wiki page — re-readable, and it changes silently |
+| `web` | low | a URL rots, paywalls, or changes with no version and no notice |
+| `slack`, `conversation` | low | someone said so; unrecheckable afterwards |
 | `inferred` | low | reasoned, not verified — never presented as fact |
+
+A kind exists only where it changes one of three answers: what the claim is
+worth, whether it will have moved since, and which tool re-checks it. Two
+candidates that answer all three the same way are one kind — which is why an
+Obsidian note and a local PDF share `document` (both are a file you open at a
+named place, and the ref carries which), while `confluence` stays separate
+(its own tool, and it changes under you) and `web` stays separate (it may
+simply be gone).
 
 ### Staleness
 

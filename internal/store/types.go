@@ -36,7 +36,9 @@ const (
 	SourceFile         = "file"
 	SourceGitLabMR     = "gitlab-mr"
 	SourceJira         = "jira"
+	SourceDocument     = "document"
 	SourceConfluence   = "confluence"
+	SourceWeb          = "web"
 	SourceSlack        = "slack"
 	SourceConversation = "conversation"
 	SourceInferred     = "inferred"
@@ -189,9 +191,18 @@ func ParseTime(s string) (time.Time, error) {
 func DeriveConfidence(sourceKind string) string {
 	switch sourceKind {
 	case SourceFile, SourceGitLabMR:
+		// Pinned to a commit or a diff, so it can be re-read exactly.
 		return ConfidenceHigh
-	case SourceJira, SourceConfluence:
+	case SourceJira, SourceDocument, SourceConfluence:
+		// A real document at a named place. Re-readable, but it may have moved
+		// under you — and a document is derivative: a plan or a run sheet is
+		// only as good as whatever it was written from, which is why it ranks
+		// below the code it describes.
 		return ConfidenceMedium
+	case SourceWeb:
+		// A URL rots, paywalls, or changes with no version and no notice. Closer
+		// to hearsay than to a document you hold.
+		return ConfidenceLow
 	case SourceSlack, SourceConversation:
 		return ConfidenceLow
 	case SourceInferred:
@@ -274,15 +285,18 @@ func ValidateFileRef(ref string) error {
 // ValidSourceKind reports whether kind is one agentctx knows how to weigh.
 func ValidSourceKind(kind string) bool {
 	switch kind {
-	case SourceFile, SourceGitLabMR, SourceJira, SourceConfluence,
-		SourceSlack, SourceConversation, SourceInferred:
+	case SourceFile, SourceGitLabMR, SourceJira, SourceDocument, SourceConfluence,
+		SourceWeb, SourceSlack, SourceConversation, SourceInferred:
 		return true
 	}
 	return false
 }
 
 // SourceKinds lists the valid source kinds, for error messages and tool schemas.
+//
+// Ordered strongest first, because the list is read by a model choosing one and
+// the order is itself the advice.
 func SourceKinds() []string {
-	return []string{SourceFile, SourceGitLabMR, SourceJira, SourceConfluence,
-		SourceSlack, SourceConversation, SourceInferred}
+	return []string{SourceFile, SourceGitLabMR, SourceJira, SourceDocument,
+		SourceConfluence, SourceWeb, SourceSlack, SourceConversation, SourceInferred}
 }

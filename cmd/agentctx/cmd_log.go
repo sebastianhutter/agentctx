@@ -86,7 +86,7 @@ func init() {
 	_ = logDecisionCmd.MarkFlagRequired("rationale")
 
 	logFindingCmd.Flags().StringVar(&findingText, "finding", "", "What is true (required)")
-	logFindingCmd.Flags().StringVar(&findingKind, "source-kind", "", "file | gitlab-mr | jira | confluence | slack | conversation | inferred (required)")
+	logFindingCmd.Flags().StringVar(&findingKind, "source-kind", "", "file | gitlab-mr | jira | document | confluence | web | slack | conversation | inferred (required)")
 	logFindingCmd.Flags().StringVar(&findingRef, "source-ref", "", "Pointer into the source, e.g. path@commit")
 	logFindingCmd.Flags().StringVar(&findingDate, "retrieved", "", "Retrieval date YYYY-MM-DD (default today)")
 	logFindingCmd.Flags().StringVar(&findingScope, "scope", "", "task | repo | project (default task)")
