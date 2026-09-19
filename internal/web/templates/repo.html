@@ -1,0 +1,17 @@
+{{template "layout" .}}
+{{define "title"}}{{.Repo}} — agentctx{{end}}
+{{define "content"}}
+<p class="crumb"><a href="/project/{{.ProjectID}}">{{.ProjectID}}</a> /</p>
+<h1>{{.Repo}}</h1>
+<p class="muted">What we know about this repository, across every task that touched it.</p>
+
+{{if .HasBody}}
+  <section class="note">{{.Body}}</section>
+{{else}}
+  <p class="nudge">No consolidated note for this repository yet. This is the page that pays for itself —
+  it is what the next task touching this repo reads first.</p>
+{{end}}
+
+<h2>Repo-scoped findings</h2>
+{{template "entrylist" .Findings}}
+{{end}}

@@ -34,8 +34,8 @@ macOS only. Download the DMG from the releases page, drag agentctx to
 Applications, and open it from the context menu the first time — it is not
 notarised, so a plain double-click is refused.
 
-It lives in the menu bar: start and stop the MCP server, copy its endpoint,
-open the vault, edit settings.
+It lives in the menu bar: start and stop the MCP server, copy its endpoint, open
+the web interface, open the vault, edit settings.
 
 Building it yourself needs Go and Xcode's command line tools:
 
@@ -111,6 +111,22 @@ Convenient, and the only option for a host that cannot spawn a process. One
 difference worth knowing: a shared server cannot see any caller's environment,
 so the host recorded on an entry comes from the MCP client's own name rather
 than from detection. Task ids are required either way.
+
+## Web interface
+
+`http://localhost:31125/` — projects, tasks, repository notes, and a log view
+filterable by project, task, kind, scope and host. Opened from the menu bar, or
+run on its own with `agentctx web`.
+
+Read-mostly, deliberately. Obsidian edits notes better than a browser form, and
+everything an agent writes goes through the verbs — so the two things this does
+that neither does well are the cross-cutting log view (which is where "did this
+host write anything" gets answered) and creating a project, the one write action
+worth a form.
+
+Bound to loopback and unauthenticated. It also checks the `Host` header, because
+a loopback bind stops another machine connecting but not a web page resolving a
+name it controls to `127.0.0.1` and reading the vault through your browser.
 
 ## Vault layout
 

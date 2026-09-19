@@ -1,0 +1,35 @@
+{{template "layout" .}}
+{{define "title"}}{{.Task.ID}} — agentctx{{end}}
+{{define "content"}}
+<p class="crumb"><a href="/project/{{.ProjectID}}">{{.ProjectID}}</a> /</p>
+<h1>{{if .Task.Title}}{{.Task.Title}}{{else}}{{.Task.ID}}{{end}}</h1>
+
+{{if .OpenBlockers}}
+<div class="blocked">
+  <strong>Blocked.</strong> Waiting for
+  {{range .OpenBlockers}}<a href="/project/{{$.ProjectID}}/task/{{.}}">{{.}}</a> {{end}}
+</div>
+{{end}}
+
+<p class="muted">
+  <code>{{.Task.ID}}</code>
+  {{if .Task.SourceKey}} · {{.Task.Source}} {{.Task.SourceKey}}{{end}}
+  {{if .Task.Repos}} · {{join .Task.Repos ", "}}{{end}}
+  {{if .Closed}} · <span class="pill">closed</span>{{end}}
+</p>
+{{if .Task.SourceURL}}<p><a href="{{.Task.SourceURL}}">{{.Task.SourceURL}}</a></p>{{end}}
+
+{{if .Blocks}}
+<p class="muted">Blocks: {{range .Blocks}}<a href="/project/{{$.ProjectID}}/task/{{.}}">{{.}}</a> {{end}}</p>
+{{end}}
+
+{{if .HasBody}}
+  <section class="note">{{.Body}}</section>
+{{else}}
+  <p class="nudge">No consolidated body yet — everything known about this task is in the entries below.</p>
+{{end}}
+
+<h2>{{if .Folded}}Since the last consolidation{{else}}Entries{{end}}</h2>
+{{if .Folded}}<p class="muted">{{plural .Folded "earlier entry" "earlier entries"}} already folded into the body above.</p>{{end}}
+{{template "entrylist" .Unconsolidated}}
+{{end}}

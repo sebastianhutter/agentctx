@@ -31,6 +31,12 @@ func (s *Store) RepoNotePath(project, repo string) string {
 
 // ReadRepoNote reads a repository note.
 func (s *Store) ReadRepoNote(project, repo string) (*RepoNote, string, error) {
+	if err := ValidateID("project", project); err != nil {
+		return nil, "", err
+	}
+	if err := ValidateRepo(repo); err != nil {
+		return nil, "", err
+	}
 	var note RepoNote
 	body, err := vault.ReadInto(s.RepoNotePath(project, repo), &note)
 	if err != nil {

@@ -1,0 +1,33 @@
+{{template "layout" .}}
+{{define "title"}}New project — agentctx{{end}}
+{{define "content"}}
+<h1>New project</h1>
+<p class="muted">Projects are created deliberately and are few; tasks are created lazily by agents and are many.
+The tracker keys below are what let <code>PROJ-142</code> resolve to this project later, and they cannot be guessed.</p>
+
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+
+<form method="post" action="/new" class="stack">
+  <label>Project id
+    <input name="project_id" required placeholder="proj" value="{{with .Form}}{{.ID}}{{end}}">
+    <small>Lower case, no slashes. Also the folder name in the vault.</small>
+  </label>
+  <label>Name
+    <input name="name" required placeholder="Example project" value="{{with .Form}}{{.Name}}{{end}}">
+  </label>
+  <label>Tracker project keys
+    <textarea name="jira_projects" rows="2" placeholder="PROJ">{{with .Form}}{{join .JiraProjects "\n"}}{{end}}</textarea>
+    <small>One per line or comma separated.</small>
+  </label>
+  <label>Repositories
+    <textarea name="repos" rows="3" placeholder="acme/infrastructure">{{with .Form}}{{join .Repos "\n"}}{{end}}</textarea>
+  </label>
+  <label>GitLab groups
+    <textarea name="gitlab_groups" rows="2">{{with .Form}}{{join .GitLabGroups "\n"}}{{end}}</textarea>
+  </label>
+  <label>Wiki spaces
+    <textarea name="confluence_spaces" rows="2">{{with .Form}}{{join .ConfluenceSpaces "\n"}}{{end}}</textarea>
+  </label>
+  <button type="submit">Create project</button>
+</form>
+{{end}}

@@ -34,6 +34,7 @@ type App struct {
 	version    string
 
 	mcpService MCPService
+	webService WebService
 
 	// statusLabel is the cached vault summary shown in the menu.
 	statusMu    sync.Mutex
@@ -85,6 +86,7 @@ func Run(configPath, version string) error {
 		rebuildCh:   make(chan struct{}, 1),
 		done:        make(chan struct{}),
 		mcpService:  MCPService{configPath: configPath, version: version},
+		webService:  WebService{configPath: configPath, version: version},
 	}
 
 	// Must happen on the main goroutine.
@@ -107,6 +109,13 @@ func Run(configPath, version string) error {
 		}()
 	}
 
+	if cfg.GUI.AutoStartWeb {
+		if err := a.webService.Start(cfg.GUI.WebPort); err != nil {
+			slog.Error("auto-start web interface failed", "err", err)
+		}
+		a.requestRebuild()
+	}
+
 	go a.updateStatus()
 
 	slog.Info("agentctx menu bar app started", "version", version)
@@ -114,6 +123,7 @@ func Run(configPath, version string) error {
 
 	close(a.done)
 	a.mcpService.Stop()
+	a.webService.Stop()
 	slog.Info("agentctx menu bar app stopped")
 	if a.logFile != nil {
 		a.logFile.Close()
@@ -171,10 +181,7 @@ func (a *App) doRebuildMenu() {
 		a.statusMenuItem(),
 		&fyne.MenuItem{Label: "Open Vault…", Action: a.openVault},
 		fyne.NewMenuItemSeparator(),
-		// Present but inert until the web interface exists. Shown rather than
-		// hidden so the menu says what the app is going to be, and so its
-		// absence is obviously deliberate rather than a missing feature.
-		&fyne.MenuItem{Label: "Open Web Interface (not built yet)", Disabled: true},
+		a.webMenuItem(),
 		fyne.NewMenuItemSeparator(),
 		&fyne.MenuItem{Label: "Settings…", Action: a.openSettings},
 		&fyne.MenuItem{Label: "View Logs…", Action: a.openLogs},
@@ -202,6 +209,40 @@ func (a *App) mcpMenuItem() *fyne.MenuItem {
 		Action:   a.toggleMCP,
 		Disabled: a.mcpStarting,
 	}
+}
+
+// webMenuItem opens the web interface, or offers to start it.
+func (a *App) webMenuItem() *fyne.MenuItem {
+	if a.webService.IsRunning() {
+		return &fyne.MenuItem{Label: "Open Web Interface", Action: a.openWeb}
+	}
+	return &fyne.MenuItem{Label: "Start Web Interface", Action: a.startWeb}
+}
+
+func (a *App) openWeb() {
+	url := a.webService.URL()
+	if url == "" {
+		a.startWeb()
+		url = a.webService.URL()
+	}
+	if url == "" {
+		return
+	}
+	if err := exec.Command("open", url).Start(); err != nil {
+		slog.Error("failed to open the web interface", "url", url, "err", err)
+	}
+}
+
+func (a *App) startWeb() {
+	a.cfgMu.RLock()
+	port := a.cfg.GUI.WebPort
+	a.cfgMu.RUnlock()
+
+	if err := a.webService.Start(port); err != nil {
+		slog.Error("failed to start the web interface", "err", err)
+		a.notify("Could not start the web interface: " + err.Error())
+	}
+	a.requestRebuild()
 }
 
 func (a *App) endpointLabel() string {

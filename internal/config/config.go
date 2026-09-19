@@ -49,6 +49,8 @@ type ConfidenceConfig struct {
 type GUIConfig struct {
 	AutoStartMCP bool `json:"auto_start_mcp"`
 	MCPPort      int  `json:"mcp_port"`
+	AutoStartWeb bool `json:"auto_start_web"`
+	WebPort      int  `json:"web_port"`
 	StartOnLogin bool `json:"start_on_login"`
 }
 
@@ -104,6 +106,12 @@ func (c *Config) Validate() []error {
 
 	if c.GUI.MCPPort < 1024 || c.GUI.MCPPort > 65535 {
 		errs = append(errs, fmt.Errorf("gui.mcp_port %d is outside the usable range 1024-65535", c.GUI.MCPPort))
+	}
+	if c.GUI.WebPort < 1024 || c.GUI.WebPort > 65535 {
+		errs = append(errs, fmt.Errorf("gui.web_port %d is outside the usable range 1024-65535", c.GUI.WebPort))
+	}
+	if c.GUI.WebPort == c.GUI.MCPPort {
+		errs = append(errs, fmt.Errorf("gui.web_port and gui.mcp_port are both %d; one of them will not start", c.GUI.MCPPort))
 	}
 
 	return errs
@@ -193,6 +201,8 @@ func defaults() *Config {
 		GUI: GUIConfig{
 			AutoStartMCP: true,
 			MCPPort:      31124,
+			AutoStartWeb: true,
+			WebPort:      31125,
 			StartOnLogin: false,
 		},
 	}

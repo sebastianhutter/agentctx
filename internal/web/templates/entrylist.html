@@ -1,0 +1,20 @@
+{{define "entrylist"}}
+{{if not .}}<p class="muted">Nothing here.</p>{{end}}
+{{range .}}
+<article class="entry {{kindClass .Kind}}">
+  <div class="entry-head">
+    <span class="pill {{kindClass .Kind}}">{{.Kind}}</span>
+    {{if .Task}}<code>{{.Task}}</code>{{end}}
+    <span class="pill scope">{{.Scope}}{{if .Repo}} · {{.Repo}}{{end}}</span>
+    {{if .Confidence}}<span class="pill conf-{{.Confidence}}">{{.Confidence}}</span>{{end}}
+    <span class="muted right">{{.TS}} {{if .Age}}· {{.Age}}{{end}} {{if .Host}}· {{.Host}}{{end}}</span>
+  </div>
+  <div class="entry-body">{{.Body}}</div>
+  {{if .Source}}
+    <p class="source">{{.Source.Kind}}{{if .Source.Ref}} <code>{{.Source.Ref}}</code>{{end}}
+    {{if .Source.Retrieved}}· retrieved {{.Source.Retrieved}}{{end}}</p>
+  {{end}}
+  {{if .Stale}}<p class="stale">re-verify: {{.StaleReason}}</p>{{end}}
+</article>
+{{end}}
+{{end}}

@@ -1,0 +1,13 @@
+{{define "error.html"}}<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>{{.Title}} — agentctx</title>
+<link rel="stylesheet" href="/static/style.css"></head>
+<body>
+<header><a class="brand" href="/">agentctx</a></header>
+<main>
+  <h1>{{.Title}}</h1>
+  <div class="error">{{.Error}}</div>
+  <p><a href="/">Back to projects</a></p>
+</main>
+</body>
+</html>{{end}}

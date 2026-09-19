@@ -1,0 +1,39 @@
+{{template "layout" .}}
+{{define "title"}}Log — agentctx{{end}}
+{{define "content"}}
+<h1>Log</h1>
+
+<form class="filters" method="get" action="/log">
+  <label>Project
+    <select name="project">
+      <option value="">any</option>
+      {{range .Projects}}<option value="{{.}}" {{if eq . $.Want.Project}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Kind
+    <select name="kind">
+      <option value="">any</option>
+      {{range .Kinds}}<option value="{{.Value}}" {{if eq .Value $.Want.Kind}}selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+    </select>
+  </label>
+  <label>Scope
+    <select name="scope">
+      <option value="">any</option>
+      {{range .Scopes}}<option value="{{.Value}}" {{if eq .Value $.Want.Scope}}selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+    </select>
+  </label>
+  <label>Host
+    <select name="host">
+      <option value="">any</option>
+      {{range .Hosts}}<option value="{{.Value}}" {{if eq .Value $.Want.Host}}selected{{end}}>{{.Value}} ({{.Count}})</option>{{end}}
+    </select>
+  </label>
+  <label>Task <input type="text" name="task" value="{{.Want.Task}}" placeholder="any"></label>
+  <button type="submit">Filter</button>
+  <a class="clear" href="/log">clear</a>
+</form>
+
+<p class="muted">{{if lt .Shown .Total}}Showing the {{.Shown}} newest of {{.Total}} entries.{{else}}{{plural .Total "entry" "entries"}}.{{end}}</p>
+
+{{template "entrylist" .Entries}}
+{{end}}

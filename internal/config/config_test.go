@@ -26,6 +26,9 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	if !cfg.GUI.AutoStartMCP {
 		t.Error("gui.auto_start_mcp = false, want true by default")
 	}
+	if cfg.GUI.WebPort != 31125 || cfg.GUI.WebPort == cfg.GUI.MCPPort {
+		t.Errorf("gui.web_port = %d, want 31125 and distinct from the MCP port", cfg.GUI.WebPort)
+	}
 }
 
 func TestLoadKeepsDefaultsForAbsentFields(t *testing.T) {
@@ -76,21 +79,21 @@ func TestValidate(t *testing.T) {
 
 	t.Run("clean", func(t *testing.T) {
 		cfg := &Config{VaultPath: vault, StateDir: t.TempDir(), Stale: StaleConfig{MaxAgeDays: 30},
-			GUI: GUIConfig{MCPPort: 31124}}
+			GUI: GUIConfig{MCPPort: 31124, WebPort: 31125}}
 		if errs := cfg.Validate(); len(errs) != 0 {
 			t.Errorf("Validate returned %v, want none", errs)
 		}
 	})
 
 	t.Run("missing vault", func(t *testing.T) {
-		cfg := &Config{VaultPath: filepath.Join(vault, "nope"), StateDir: t.TempDir(), GUI: GUIConfig{MCPPort: 31124}}
+		cfg := &Config{VaultPath: filepath.Join(vault, "nope"), StateDir: t.TempDir(), GUI: GUIConfig{MCPPort: 31124, WebPort: 31125}}
 		if errs := cfg.Validate(); len(errs) != 1 {
 			t.Errorf("Validate returned %v, want one error", errs)
 		}
 	})
 
 	t.Run("empty vault path", func(t *testing.T) {
-		cfg := &Config{StateDir: t.TempDir(), GUI: GUIConfig{MCPPort: 31124}}
+		cfg := &Config{StateDir: t.TempDir(), GUI: GUIConfig{MCPPort: 31124, WebPort: 31125}}
 		errs := cfg.Validate()
 		if len(errs) != 1 || !strings.Contains(errs[0].Error(), "vault_path is empty") {
 			t.Errorf("Validate returned %v, want an empty-vault_path error", errs)
@@ -99,7 +102,7 @@ func TestValidate(t *testing.T) {
 
 	// State inside the vault would be synced, and bindings are machine-local.
 	t.Run("state dir inside vault", func(t *testing.T) {
-		cfg := &Config{VaultPath: vault, StateDir: filepath.Join(vault, "state"), GUI: GUIConfig{MCPPort: 31124}}
+		cfg := &Config{VaultPath: vault, StateDir: filepath.Join(vault, "state"), GUI: GUIConfig{MCPPort: 31124, WebPort: 31125}}
 		errs := cfg.Validate()
 		if len(errs) != 1 || !strings.Contains(errs[0].Error(), "must not be synced") {
 			t.Errorf("Validate returned %v, want a synced-state error", errs)

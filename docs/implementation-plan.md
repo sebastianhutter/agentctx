@@ -45,8 +45,7 @@ already (Jira, GitLab, Kepler, `local-rag`).
 
 ### Deferred to v2, deliberately
 
-Desktop skill for consolidating · `Stop` and `PreCompact` hooks · the
-localhost web UI, opened from the menu bar item that is already there ·
+Desktop skill for consolidating · `Stop` and `PreCompact` hooks ·
 near-duplicate supersede (`replaces:`) · a derived SQLite index · any external
 interface, if D4 ever proves too austere.
 
@@ -688,3 +687,61 @@ Three details found by testing it:
 five or more, and name the target and `consolidated_through` to pass. The first
 project showed the failure is not that folding is hard — it is that nothing ever
 asks for it.
+
+
+---
+
+## 14. The web interface
+
+`internal/web`: projects, a project page, task pages, repository notes, a log
+view, and a form for creating a project. Served on `127.0.0.1:31125` by the menu
+bar app, or standalone with `agentctx web`. Go templates, one stylesheet, no
+JavaScript and no build step.
+
+**Read-mostly, as the notes scoped it.** Obsidian edits notes better than a
+browser form will, and everything an agent writes goes through the verbs. Two
+things this does that neither does well:
+
+- **The log view.** Every entry, filtered by project, task, kind, scope or host,
+  newest first, with facet counts. Obsidian reads one note at a time and Bases
+  filters awkwardly across folders; this is where "which hosts actually wrote
+  anything" gets answered.
+- **Creating a project**, the one write action worth a form — the key-prefix
+  mapping has to be typed by a person, and doing it through a chat to get a note
+  written is a silly way to fill in four fields.
+
+It also shows what is *not* consolidated: a project or task whose body is empty
+says so, and the repository list marks which pages exist, which have findings
+waiting to be folded, and which have nothing recorded. The same nudge as the
+bundles, aimed at the person rather than the agent.
+
+### Two security properties, neither theoretical
+
+**Path traversal.** Ids become path segments, and `ProjectPath("../../etc")`
+resolved to `/etc.md`. Harmless while only an agent could pass one; a file-read
+hole the moment ids arrive from a URL. `store.ValidateID` now rejects separators,
+`..`, leading dots, null bytes and over-long ids, and it is enforced at the store
+API rather than in the web layer, so every caller gets it — including the one
+added next year by someone who has not read this.
+
+**DNS rebinding.** The listener is on loopback, which stops another machine
+connecting. It does not stop a page in your browser resolving a name it controls
+to `127.0.0.1` and reading the vault through you. A `Host` header check closes
+that and costs nothing, which is worth doing before pointing a browser at a
+folder containing everything you know.
+
+### Found by writing the tests
+
+- **Every page rendered as the same page.** Each page template defines
+  `content`, and `html/template` keeps one definition per name in a set — so
+  parsing them together left whichever file was read last answering for all of
+  them. One template set per page.
+- **The project page 500'd** on real data: it passed raw entries to a template
+  expecting decorated ones.
+- **A new project showed no repositories**, because the list only included repos
+  that already had notes or findings. They are part of what a project *is*.
+- **A freshly created note looked consolidated**, since its skeleton of empty
+  headings is not an empty body. Headings with nothing under them do not count.
+- **`[[proj-210]]` rendered as literal brackets.** The vault's own link syntax,
+  which markdown does not know; it now resolves through `/t/<id>`, which finds
+  the task's project so a note body does not have to carry one.

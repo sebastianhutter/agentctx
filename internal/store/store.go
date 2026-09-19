@@ -100,6 +100,9 @@ func (s *Store) ListProjects() ([]string, error) {
 
 // ReadProject reads a project note.
 func (s *Store) ReadProject(id string) (*ProjectNote, string, error) {
+	if err := ValidateID("project", id); err != nil {
+		return nil, "", err
+	}
 	var note ProjectNote
 	body, err := vault.ReadInto(s.ProjectPath(id), &note)
 	if err != nil {
@@ -113,8 +116,8 @@ func (s *Store) ReadProject(id string) (*ProjectNote, string, error) {
 
 // CreateProject writes a new project note with an empty body.
 func (s *Store) CreateProject(note *ProjectNote) error {
-	if note.ID == "" {
-		return errors.New("project id is required")
+	if err := ValidateID("project", note.ID); err != nil {
+		return err
 	}
 	if note.Created == "" {
 		note.Created = s.now().Format(LayoutDate)
@@ -190,6 +193,12 @@ func (s *Store) ResolveProjectForKey(key string) (string, error) {
 
 // ReadTask reads a task note.
 func (s *Store) ReadTask(project, id string) (*TaskNote, string, error) {
+	if err := ValidateID("project", project); err != nil {
+		return nil, "", err
+	}
+	if err := ValidateID("task", id); err != nil {
+		return nil, "", err
+	}
 	var note TaskNote
 	body, err := vault.ReadInto(s.TaskPath(project, id), &note)
 	if err != nil {
@@ -203,16 +212,19 @@ func (s *Store) ReadTask(project, id string) (*TaskNote, string, error) {
 
 // TaskExists reports whether a task note is already in the vault.
 func (s *Store) TaskExists(project, id string) bool {
+	if ValidateID("project", project) != nil || ValidateID("task", id) != nil {
+		return false
+	}
 	return vault.Exists(s.TaskPath(project, id))
 }
 
 // CreateTask writes a new task note with empty body sections.
 func (s *Store) CreateTask(note *TaskNote) error {
-	if note.ID == "" {
-		return errors.New("task id is required")
+	if err := ValidateID("task", note.ID); err != nil {
+		return err
 	}
-	if note.Project == "" {
-		return errors.New("task project is required")
+	if err := ValidateID("project", note.Project); err != nil {
+		return err
 	}
 	if note.Created == "" {
 		note.Created = s.now().Format(LayoutDate)
@@ -273,8 +285,21 @@ func (s *Store) Append(entry *Entry) (string, error) {
 	if entry.Scope == "" {
 		entry.Scope = ScopeTask
 	}
+	if err := ValidateID("project", entry.Project); err != nil {
+		return "", err
+	}
+	if entry.Task != "" {
+		if err := ValidateID("task", entry.Task); err != nil {
+			return "", err
+		}
+	}
 	if entry.Scope == ScopeRepo && entry.Repo == "" {
 		return "", errors.New("scope is repo but no repo was given")
+	}
+	if entry.Repo != "" {
+		if err := ValidateRepo(entry.Repo); err != nil {
+			return "", err
+		}
 	}
 
 	stamp, err := ParseTime(entry.TS)
@@ -328,6 +353,9 @@ type EntryFilter struct {
 // milliseconds for the volumes one person produces, and it keeps the files the
 // single source of truth with no index to fall out of step.
 func (s *Store) Entries(project string, filter EntryFilter) ([]*Entry, error) {
+	if err := ValidateID("project", project); err != nil {
+		return nil, err
+	}
 	dir := s.LogDir(project)
 	dirEntries, err := os.ReadDir(dir)
 	if err != nil {
@@ -446,6 +474,9 @@ func randomSuffix() string {
 
 // ListTasks returns the ids of every task note in a project.
 func (s *Store) ListTasks(project string) ([]string, error) {
+	if err := ValidateID("project", project); err != nil {
+		return nil, err
+	}
 	dir := filepath.Join(s.ProjectDir(project), "tasks")
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -1,0 +1,29 @@
+{{template "layout" .}}
+{{define "title"}}Projects — agentctx{{end}}
+{{define "content"}}
+<h1>Projects</h1>
+<p class="muted">Vault: <code>{{.Vault}}</code></p>
+
+{{if not .Projects}}
+  <div class="empty">
+    <p>No projects yet.</p>
+    <p>Projects are created deliberately — <a href="/new">make one</a>, or call
+    <code>open_project</code> from an agent.</p>
+  </div>
+{{end}}
+
+{{range .Projects}}
+<article class="card">
+  <h2><a href="/project/{{.ID}}">{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</a></h2>
+  <p class="muted"><code>{{.ID}}</code>{{if .Repos}} · {{join .Repos ", "}}{{end}}</p>
+  <p class="counts">
+    <span>{{plural .Ready "task"}} ready</span>
+    {{if .Blocked}}<span class="warn">{{.Blocked}} blocked</span>{{end}}
+    {{if .Closed}}<span class="muted">{{.Closed}} closed</span>{{end}}
+    <span class="muted">{{plural .Entries "entry" "entries"}}</span>
+    {{if .Last}}<span class="muted">last {{.Last}}</span>{{end}}
+  </p>
+  {{if .Stale}}<p class="nudge">Nothing consolidated into the project note yet — it reads as empty in Obsidian.</p>{{end}}
+</article>
+{{end}}
+{{end}}

@@ -149,6 +149,20 @@ func (a *App) buildServerTab(cfg *config.Config) fyne.CanvasObject {
 	})
 	startOnLogin.SetChecked(cfg.GUI.StartOnLogin)
 
+	webPort := widget.NewEntry()
+	webPort.SetText(strconv.Itoa(cfg.GUI.WebPort))
+	webPort.Validator = intValidator(1024, 65535)
+	webPort.OnChanged = func(s string) {
+		if v, err := strconv.Atoi(s); err == nil {
+			cfg.GUI.WebPort = v
+		}
+	}
+
+	autoWeb := widget.NewCheck("Start the web interface when this app launches", func(b bool) {
+		cfg.GUI.AutoStartWeb = b
+	})
+	autoWeb.SetChecked(cfg.GUI.AutoStartWeb)
+
 	portEntry := widget.NewEntry()
 	portEntry.SetText(strconv.Itoa(cfg.GUI.MCPPort))
 	portEntry.Validator = intValidator(1024, 65535)
@@ -159,8 +173,10 @@ func (a *App) buildServerTab(cfg *config.Config) fyne.CanvasObject {
 	}
 
 	form := widget.NewForm(
-		widget.NewFormItem("Port", portEntry),
+		widget.NewFormItem("MCP port", portEntry),
 		widget.NewFormItem("", autoStart),
+		widget.NewFormItem("Web port", webPort),
+		widget.NewFormItem("", autoWeb),
 		widget.NewFormItem("", startOnLogin),
 	)
 

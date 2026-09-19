@@ -1,0 +1,469 @@
+package web
+
+import (
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/sebastianhutter/agentctx/internal/service"
+	"github.com/sebastianhutter/agentctx/internal/store"
+)
+
+// projectSummary is a row on the index.
+type projectSummary struct {
+	ID      string
+	Name    string
+	Repos   []string
+	Tasks   int
+	Ready   int
+	Blocked int
+	Closed  int
+	Entries int
+	Last    string
+	Stale   bool // nothing in the note body yet
+}
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	st, cfg, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	ids, err := st.ListProjects()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	var rows []projectSummary
+	for _, id := range ids {
+		note, body, err := st.ReadProject(id)
+		if err != nil {
+			continue
+		}
+		entries, err := st.Entries(id, store.EntryFilter{})
+		if err != nil {
+			continue
+		}
+		graph, err := st.DependencyGraph(id)
+		if err != nil {
+			continue
+		}
+		tasks, err := st.ListTasks(id)
+		if err != nil {
+			continue
+		}
+
+		row := projectSummary{
+			ID: id, Name: note.Name, Repos: note.Repos,
+			Tasks: len(tasks), Entries: len(entries),
+			Stale: !hasContent(body),
+		}
+		for _, t := range tasks {
+			switch {
+			case graph.Closed[t]:
+				row.Closed++
+			case graph.Ready(t):
+				row.Ready++
+			default:
+				row.Blocked++
+			}
+		}
+		if len(entries) > 0 {
+			row.Last = entries[len(entries)-1].TS
+		}
+		rows = append(rows, row)
+	}
+
+	s.render(w, "index.html", map[string]any{
+		"Page":     "projects",
+		"Projects": rows,
+		"Vault":    cfg.ExpandedVaultPath(),
+		"Version":  s.version,
+	})
+}
+
+// taskRow is a task as listed on a project page.
+type taskRow struct {
+	ID      string
+	Title   string
+	Closed  bool
+	Waiting []string
+	Entries int
+}
+
+func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
+	st, cfg, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	id := r.PathValue("project")
+
+	note, body, err := st.ReadProject(id)
+	if err != nil {
+		s.fail(w, err, http.StatusNotFound)
+		return
+	}
+	entries, err := st.Entries(id, store.EntryFilter{})
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	graph, err := st.DependencyGraph(id)
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	taskIDs, err := st.ListTasks(id)
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	counts := map[string]int{}
+	for _, e := range entries {
+		if e.Task != "" {
+			counts[e.Task]++
+		}
+	}
+
+	var ready, blocked, closed []taskRow
+	for _, t := range taskIDs {
+		note, _, err := st.ReadTask(id, t)
+		title := t
+		if err == nil && note.Title != "" {
+			title = note.Title
+		}
+		row := taskRow{ID: t, Title: title, Entries: counts[t]}
+		switch {
+		case graph.Closed[t]:
+			row.Closed = true
+			closed = append(closed, row)
+		case graph.Ready(t):
+			ready = append(ready, row)
+		default:
+			row.Waiting = graph.OpenBlockers(t)
+			blocked = append(blocked, row)
+		}
+	}
+
+	// Every repository the project claims, whether or not anything has been
+	// recorded about it. They are part of what the project *is*; listing only
+	// the ones with findings makes a new project look like it has no
+	// repositories at all, and hides the ones still waiting to be written about.
+	findings := map[string]int{}
+	for _, e := range entries {
+		if e.Scope == store.ScopeRepo && e.Repo != "" {
+			findings[e.Repo]++
+		}
+	}
+	type repoRow struct {
+		Repo         string
+		Consolidated bool
+		Findings     int
+	}
+	var repos []repoRow
+	for _, repo := range note.Repos {
+		_, _, err := st.ReadRepoNote(id, repo)
+		repos = append(repos, repoRow{Repo: repo, Consolidated: err == nil, Findings: findings[repo]})
+	}
+	// A repository written about but not listed on the project note still
+	// deserves a page — the alternative is knowledge with nowhere to appear.
+	for repo := range findings {
+		if !containsString(note.Repos, repo) {
+			repos = append(repos, repoRow{Repo: repo, Findings: findings[repo]})
+		}
+	}
+	sort.Slice(repos, func(i, j int) bool { return repos[i].Repo < repos[j].Repo })
+
+	s.render(w, "project.html", map[string]any{
+		"Page":    "projects",
+		"Project": note,
+		"Body":    markdown(body),
+		"HasBody": strings.TrimSpace(body) != "",
+		"Ready":   ready,
+		"Blocked": blocked,
+		"Closed":  closed,
+		"Repos":   repos,
+		"Recent":  decorate(lastN(entries, 15), cfg.Stale.MaxAgeDays),
+		"Entries": len(entries),
+		"Version": s.version,
+	})
+}
+
+func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
+	st, cfg, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	projectID := r.PathValue("project")
+	taskID := r.PathValue("task")
+
+	note, body, err := st.ReadTask(projectID, taskID)
+	if err != nil {
+		s.fail(w, err, http.StatusNotFound)
+		return
+	}
+
+	var since time.Time
+	if note.ConsolidatedThrough != "" {
+		if t, err := store.ParseTime(note.ConsolidatedThrough); err == nil {
+			since = t
+		}
+	}
+	unconsolidated, err := st.Entries(projectID, store.EntryFilter{Task: taskID, Since: since})
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	all, err := st.Entries(projectID, store.EntryFilter{Task: taskID})
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	graph, err := st.DependencyGraph(projectID)
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.render(w, "task.html", map[string]any{
+		"Page":           "projects",
+		"ProjectID":      projectID,
+		"Task":           note,
+		"Body":           markdown(body),
+		"HasBody":        hasContent(body),
+		"Unconsolidated": decorate(unconsolidated, cfg.Stale.MaxAgeDays),
+		"Folded":         len(all) - len(unconsolidated),
+		"OpenBlockers":   graph.OpenBlockers(taskID),
+		"Blockers":       graph.BlockedBy[taskID],
+		"Blocks":         graph.Blocks[taskID],
+		"Closed":         graph.Closed[taskID],
+		"Version":        s.version,
+	})
+}
+
+// handleTaskRedirect resolves a bare task id to its project.
+func (s *Server) handleTaskRedirect(w http.ResponseWriter, r *http.Request) {
+	st, _, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	taskID := r.PathValue("task")
+
+	project, err := st.FindTask(taskID)
+	if err != nil {
+		s.fail(w, err, http.StatusNotFound)
+		return
+	}
+	http.Redirect(w, r, "/project/"+project+"/task/"+taskID, http.StatusSeeOther)
+}
+
+func (s *Server) handleRepoNote(w http.ResponseWriter, r *http.Request) {
+	st, cfg, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	projectID := r.PathValue("project")
+	repo := r.PathValue("repo")
+
+	note, body, err := st.ReadRepoNote(projectID, repo)
+	if err != nil {
+		note = &store.RepoNote{Repo: repo, Project: projectID}
+		body = ""
+	}
+	findings, err := st.Entries(projectID, store.EntryFilter{
+		Scope: store.ScopeRepo, Repos: []string{repo}, Kinds: []string{store.KindFinding},
+	})
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	s.render(w, "repo.html", map[string]any{
+		"Page":      "projects",
+		"ProjectID": projectID,
+		"Note":      note,
+		"Repo":      repo,
+		"Body":      markdown(body),
+		"HasBody":   hasContent(body),
+		"Findings":  decorate(findings, cfg.Stale.MaxAgeDays),
+		"Version":   s.version,
+	})
+}
+
+// handleLog is the cross-cutting view: every entry, filtered by anything.
+//
+// The reason this interface exists at all. Obsidian reads one note at a time
+// and a Bases view filters awkwardly across folders; this is where "which hosts
+// actually wrote anything" gets answered.
+func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
+	st, cfg, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	q := r.URL.Query()
+	want := struct{ Project, Task, Kind, Host, Scope, Repo string }{
+		Project: q.Get("project"), Task: q.Get("task"), Kind: q.Get("kind"),
+		Host: q.Get("host"), Scope: q.Get("scope"), Repo: q.Get("repo"),
+	}
+
+	projects, err := st.ListProjects()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	var entries []*store.Entry
+	kinds := map[string]int{}
+	hosts := map[string]int{}
+	scopes := map[string]int{}
+
+	for _, p := range projects {
+		if want.Project != "" && p != want.Project {
+			continue
+		}
+		found, err := st.Entries(p, store.EntryFilter{})
+		if err != nil {
+			continue
+		}
+		for _, e := range found {
+			// Counts describe the unfiltered set for this project selection, so
+			// the facets do not vanish as soon as one is chosen.
+			kinds[e.Kind]++
+			hosts[e.Host]++
+			scopes[e.Scope]++
+
+			switch {
+			case want.Task != "" && e.Task != want.Task:
+			case want.Kind != "" && e.Kind != want.Kind:
+			case want.Host != "" && e.Host != want.Host:
+			case want.Scope != "" && e.Scope != want.Scope:
+			case want.Repo != "" && e.Repo != want.Repo:
+			default:
+				entries = append(entries, e)
+			}
+		}
+	}
+
+	// Newest first: a log is read from the end.
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Time().After(entries[j].Time()) })
+
+	total := len(entries)
+	if len(entries) > 300 {
+		entries = entries[:300]
+	}
+
+	s.render(w, "log.html", map[string]any{
+		"Page":     "log",
+		"Entries":  decorate(entries, cfg.Stale.MaxAgeDays),
+		"Total":    total,
+		"Shown":    len(entries),
+		"Projects": projects,
+		"Kinds":    facet(kinds),
+		"Hosts":    facet(hosts),
+		"Scopes":   facet(scopes),
+		"Want":     want,
+		"Version":  s.version,
+	})
+}
+
+func (s *Server) handleNewProjectForm(w http.ResponseWriter, r *http.Request) {
+	s.render(w, "new.html", map[string]any{
+		"Page":    "new",
+		"Version": s.version,
+	})
+}
+
+func (s *Server) handleNewProject(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, err, http.StatusBadRequest)
+		return
+	}
+
+	svc, err := s.newService()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	req := service.OpenProjectRequest{
+		ID:               strings.TrimSpace(r.PostFormValue("project_id")),
+		Name:             strings.TrimSpace(r.PostFormValue("name")),
+		JiraProjects:     splitList(r.PostFormValue("jira_projects")),
+		GitLabGroups:     splitList(r.PostFormValue("gitlab_groups")),
+		Repos:            splitList(r.PostFormValue("repos")),
+		ConfluenceSpaces: splitList(r.PostFormValue("confluence_spaces")),
+	}
+
+	if _, err := svc.OpenProject(req); err != nil {
+		s.render(w, "new.html", map[string]any{
+			"Page":    "new",
+			"Error":   err.Error(),
+			"Form":    req,
+			"Version": s.version,
+		})
+		return
+	}
+	http.Redirect(w, r, "/project/"+req.ID, http.StatusSeeOther)
+}
+
+// splitList accepts one per line or comma-separated, since a form invites both.
+func splitList(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == '\n' || r == '\r' || r == ','
+	})
+	var out []string
+	for _, f := range fields {
+		if f = strings.TrimSpace(f); f != "" {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func containsString(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func lastN[T any](items []T, n int) []T {
+	if len(items) <= n {
+		return items
+	}
+	return items[len(items)-n:]
+}
+
+type facetValue struct {
+	Value string
+	Count int
+}
+
+func facet(counts map[string]int) []facetValue {
+	out := make([]facetValue, 0, len(counts))
+	for v, c := range counts {
+		if v == "" {
+			continue
+		}
+		out = append(out, facetValue{Value: v, Count: c})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count != out[j].Count {
+			return out[i].Count > out[j].Count
+		}
+		return out[i].Value < out[j].Value
+	})
+	return out
+}

@@ -1,0 +1,61 @@
+{{template "layout" .}}
+{{define "title"}}{{.Project.Name}} — agentctx{{end}}
+{{define "content"}}
+<h1>{{if .Project.Name}}{{.Project.Name}}{{else}}{{.Project.ID}}{{end}}</h1>
+<p class="muted">
+  <code>{{.Project.ID}}</code>
+  {{if .Project.JiraProjects}} · keys {{join .Project.JiraProjects ", "}}{{end}}
+  · <a href="/log?project={{.Project.ID}}">{{plural .Entries "entry" "entries"}}</a>
+</p>
+
+{{if .HasBody}}
+  <section class="note">{{.Body}}</section>
+{{else}}
+  <p class="nudge">This project note has no body yet. Consolidate it to make it readable here and in Obsidian.</p>
+{{end}}
+
+{{if .Repos}}
+<h2>Repositories</h2>
+<ul class="plain">
+{{range .Repos}}
+  <li><a href="/project/{{$.Project.ID}}/repo/{{.Repo}}">{{.Repo}}</a>
+    {{if .Consolidated}}<span class="muted">consolidated</span>
+    {{else if .Findings}}<span class="nudge-inline">{{plural .Findings "finding" "findings"}}, not folded into a note yet</span>
+    {{else}}<span class="muted">nothing recorded yet</span>{{end}}</li>
+{{end}}
+</ul>
+{{end}}
+
+{{if .Ready}}
+<h2>Ready to start</h2>
+<ul class="tasks">
+{{range .Ready}}
+  <li><a href="/project/{{$.Project.ID}}/task/{{.ID}}">{{.Title}}</a>
+      <span class="muted"><code>{{.ID}}</code> · {{plural .Entries "entry" "entries"}}</span></li>
+{{end}}
+</ul>
+{{end}}
+
+{{if .Blocked}}
+<h2>Blocked</h2>
+<ul class="tasks">
+{{range .Blocked}}
+  <li><a href="/project/{{$.Project.ID}}/task/{{.ID}}">{{.Title}}</a>
+      <span class="warn">waiting for {{join .Waiting ", "}}</span></li>
+{{end}}
+</ul>
+{{end}}
+
+{{if .Closed}}
+<h2>Closed</h2>
+<ul class="tasks muted">
+{{range .Closed}}
+  <li><a href="/project/{{$.Project.ID}}/task/{{.ID}}">{{.Title}}</a> <code>{{.ID}}</code></li>
+{{end}}
+</ul>
+{{end}}
+
+<h2>Recent entries</h2>
+{{template "entrylist" .Recent}}
+<p><a href="/log?project={{.Project.ID}}">All entries →</a></p>
+{{end}}

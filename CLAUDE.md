@@ -108,6 +108,13 @@ one.
   file or a branch name: a wrong guess attaches entries to the wrong task
   silently, and that is the one mistake here that cannot be detected or repaired.
   See §10 of the implementation plan.
+- **The web interface is read-mostly and localhost-only.** One write action —
+  creating a project. No editing note bodies: Obsidian does that better, and
+  everything an agent writes goes through the verbs. Keep the `Host` check: a
+  loopback bind alone does not stop DNS rebinding.
+- **Ids become path segments.** Anything that turns one into a path goes through
+  `store.ValidateID`. Unchecked, `../../etc` reaches outside the vault — which
+  was theoretical until ids started arriving from URLs.
 - **stdout belongs to the MCP protocol.** All logging goes to stderr via
   `log/slog`. A stray `fmt.Println` corrupts a stdio session.
 - **The environment describes the caller only over stdio and the CLI.** The SSE

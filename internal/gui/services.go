@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	localMCP "github.com/sebastianhutter/agentctx/internal/mcp"
+	"github.com/sebastianhutter/agentctx/internal/web"
 )
 
 // MCPService manages the in-process MCP SSE server behind the menu.
@@ -121,4 +122,68 @@ func (s *MCPService) URL() string {
 
 func (s *MCPService) urlFor(port int) string {
 	return fmt.Sprintf("http://localhost:%d/sse", port)
+}
+
+// WebService manages the in-process web interface.
+type WebService struct {
+	mu      sync.Mutex
+	running bool
+	port    int
+	server  *web.Server
+
+	configPath string
+	version    string
+}
+
+// Start serves the web interface on the given port.
+func (s *WebService) Start(port int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.running {
+		return fmt.Errorf("web interface already running on port %d", s.port)
+	}
+
+	server, err := web.New(s.configPath, s.version)
+	if err != nil {
+		return err
+	}
+	if err := server.Start(port); err != nil {
+		return err
+	}
+
+	s.server = server
+	s.port = port
+	s.running = true
+	return nil
+}
+
+// Stop shuts the web interface down.
+func (s *WebService) Stop() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.running {
+		return
+	}
+	s.server.Stop()
+	s.server = nil
+	s.running = false
+}
+
+// IsRunning reports whether the web interface is up.
+func (s *WebService) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
+}
+
+// URL returns the address to open, or "" when stopped.
+func (s *WebService) URL() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.running {
+		return ""
+	}
+	return fmt.Sprintf("http://localhost:%d/", s.port)
 }

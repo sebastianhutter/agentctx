@@ -11,6 +11,8 @@
     "gui": {
         "auto_start_mcp": true,
         "mcp_port": 31124,
+        "auto_start_web": true,
+        "web_port": 31125,
         "start_on_login": false
     }
 }

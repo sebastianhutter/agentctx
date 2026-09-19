@@ -1,0 +1,23 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{block "title" .}}agentctx{{end}}</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <a class="brand" href="/">agentctx</a>
+  <nav>
+    <a href="/" {{if eq .Page "projects"}}class="on"{{end}}>Projects</a>
+    <a href="/log" {{if eq .Page "log"}}class="on"{{end}}>Log</a>
+    <a href="/new" {{if eq .Page "new"}}class="on"{{end}}>New project</a>
+  </nav>
+  <span class="version">{{.Version}}</span>
+</header>
+<main>
+{{block "content" .}}{{end}}
+</main>
+</body>
+</html>{{end}}
