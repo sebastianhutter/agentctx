@@ -93,8 +93,10 @@ one.
   are folded out of the log on read. A stored copy needs clearing when reality
   changes and will not get it — that is why `status` and `blocked_by` are not
   fields.
-- **The log is the source of truth.** Note bodies are consolidated views, rewritten
-  only by the consolidation pass. Log entries are never edited or deleted.
+- **The log is the source of truth.** Note bodies are consolidated views, written
+  only by `consolidate` — the single exception to append-only, and the only place
+  two writers could lose each other's work. Log entries are never edited or
+  deleted.
 - **Nothing enters without provenance.** Every finding records where it came from
   and when. No wholesale copying from a tracker, a wiki or a search result.
 - **Projects are created deliberately, tasks lazily.** Never auto-create a project.

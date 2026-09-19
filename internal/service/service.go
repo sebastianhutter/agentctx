@@ -6,6 +6,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -497,6 +498,11 @@ func (s *Service) LogFinding(req LogFindingRequest) (*store.Entry, error) {
 		return nil, fmt.Errorf("source.kind %q is not one of %s",
 			req.Source.Kind, strings.Join(store.SourceKinds(), ", "))
 	}
+	if req.Source.Kind == store.SourceFile {
+		if err := store.ValidateFileRef(req.Source.Ref); err != nil {
+			return nil, err
+		}
+	}
 	if strings.TrimSpace(req.Source.Retrieved) == "" {
 		req.Source.Retrieved = s.now().Format(store.LayoutDate)
 	}
@@ -645,6 +651,118 @@ func wikilinks(ids []string) string {
 		out = append(out, "[["+id+"]]")
 	}
 	return strings.Join(out, ", ")
+}
+
+// --- consolidate ---
+
+// ConsolidateRequest folds logged entries into a note body.
+type ConsolidateRequest struct {
+	// TargetID is a task id or a project id.
+	TargetID string
+
+	// Repo, when set, targets that repository's note inside the target project
+	// instead of the project note itself.
+	Repo string
+
+	// Body is the composed markdown. Written verbatim.
+	Body string
+
+	// ExpectThrough is the consolidated_through the caller read. Checked when
+	// Checked is set, so two sessions folding the same note cannot silently
+	// overwrite each other.
+	ExpectThrough string
+	Checked       bool
+}
+
+// Consolidate replaces a note body with a composed view of the log.
+//
+// The only verb that rewrites anything. Everything else appends, which is what
+// makes parallel sessions safe on a synced vault; consolidation is the
+// deliberate exception, and it is why the guard above exists.
+//
+// agentctx does not compose the prose. A mechanical fold would only concatenate
+// entries, and the value of consolidating is judgement — dropping what was
+// superseded, keeping the newest with its provenance, saying what is now
+// understood rather than what was said. That is the caller's work; this writes
+// the result and records how far the log has been folded.
+func (s *Service) Consolidate(req ConsolidateRequest) (string, error) {
+	target := strings.ToLower(strings.TrimSpace(req.TargetID))
+	if target == "" {
+		return "", errors.New("target_id is required: the task or project whose note this is")
+	}
+	body := store.TrimBody(req.Body)
+	if body == "" {
+		return "", errors.New("body is required: consolidating to nothing would delete what the note says")
+	}
+
+	// A task target.
+	if project, err := s.Store.FindTask(target); err == nil {
+		if req.Repo != "" {
+			return "", errors.New("repo is for folding a repository's findings, which belong to a " +
+				"project rather than a task — pass the project id as target_id")
+		}
+
+		// Record the fold before marking how far it reached, so the record is
+		// itself covered. The other way round, every consolidation leaves its
+		// own note dangling as unconsolidated, for ever.
+		s.recordConsolidation(project, target, "task "+target)
+
+		through, err := s.Store.NewestEntry(project, store.EntryFilter{Task: target})
+		if err != nil {
+			return "", err
+		}
+		if err := s.Store.ConsolidateTask(project, target, body, through, req.ExpectThrough, req.Checked); err != nil {
+			return "", err
+		}
+		return s.Store.TaskPath(project, target), nil
+	}
+
+	// A project target, either its own note or one of its repositories'.
+	if _, _, err := s.Store.ReadProject(target); err != nil {
+		return "", fmt.Errorf("target %q is neither a known task nor a known project: %w", req.TargetID, err)
+	}
+
+	if repo := strings.TrimSpace(req.Repo); repo != "" {
+		through, err := s.Store.NewestEntry(target, store.EntryFilter{
+			Scope: store.ScopeRepo, Repos: []string{repo},
+		})
+		if err != nil {
+			return "", err
+		}
+		if err := s.Store.ConsolidateRepo(target, repo, body, through, req.ExpectThrough, req.Checked); err != nil {
+			return "", err
+		}
+		s.recordConsolidation(target, "", "repo note for "+repo)
+		return s.Store.RepoNotePath(target, repo), nil
+	}
+
+	through, err := s.Store.NewestEntry(target, store.EntryFilter{Scope: store.ScopeProject})
+	if err != nil {
+		return "", err
+	}
+	if err := s.Store.ConsolidateProject(target, body, through, req.ExpectThrough, req.Checked); err != nil {
+		return "", err
+	}
+	s.recordConsolidation(target, "", "project "+target)
+	return s.Store.ProjectPath(target), nil
+}
+
+// recordConsolidation appends a note entry saying a fold happened.
+//
+// The log stays the record of everything, including of its own compaction: a
+// rewritten note is the only thing here that loses information, so when it
+// happened and how far it went belongs in the one place that never does.
+func (s *Service) recordConsolidation(project, task, what string) {
+	body := fmt.Sprintf("Consolidated %s. Everything logged before this entry is now in the note body.", what)
+
+	if _, err := s.Store.Append(&store.Entry{
+		Kind: store.KindNote, Task: task, Project: project, Scope: store.ScopeTask,
+		Host: s.host(), Session: s.session(), Consolidation: true, Body: body,
+	}); err != nil {
+		// Not fatal: the note itself is written, and failing the call now would
+		// invite a second fold over the first.
+		slog.Warn("could not record the consolidation", "project", project, "err", err)
+	}
 }
 
 // --- close_task ---

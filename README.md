@@ -72,6 +72,7 @@ agentctx open-task proj-142 --title "Rework the network module" \
 | `log_decision` | A choice and why it was made. Rationale required |
 | `log_finding` | Something looked up and confirmed. Source required, scope chosen deliberately |
 | `log_dependency` | This task waits for those. Refuses loops and unknown ids |
+| `consolidate` | Folds logged entries into a note body — the only verb that rewrites anything |
 | `close_task` | Closes with a summary — and refuses if nothing was logged |
 
 Each is both an MCP tool and a CLI subcommand over the same core, so there is one
@@ -122,8 +123,10 @@ than from detection. Task ids are required either way.
     log/2026-09-19T1432-proj-142-decision-a3f0.md   append-only, one file per entry
 ```
 
-`log/` is the source of truth. Note bodies are consolidated views of it, rewritten
-only by the consolidation pass — never by an agent.
+`log/` is the source of truth. Note bodies are consolidated views of it, written
+only by `consolidate` — every other verb appends a file and touches nothing.
+Until a note is consolidated it reads as empty in Obsidian however much has been
+logged against it, so `open_task` says so once entries pile up.
 
 ## Design constraints
 

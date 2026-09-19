@@ -45,7 +45,7 @@ already (Jira, GitLab, Kepler, `local-rag`).
 
 ### Deferred to v2, deliberately
 
-Consolidation verb and Desktop skill · `Stop` and `PreCompact` hooks · the
+Desktop skill for consolidating · `Stop` and `PreCompact` hooks · the
 localhost web UI, opened from the menu bar item that is already there ·
 near-duplicate supersede (`replaces:`) · a derived SQLite index · any external
 interface, if D4 ever proves too austere.
@@ -641,3 +641,50 @@ filter the `log/` folder on `kind: dependency` and `resolved`. Folding the
 current blockers into the task note's frontmatter — which is what Bases would
 want for a ready-queue over tasks — belongs to the consolidation pass, since
 that is the only thing allowed to rewrite a note.
+
+
+---
+
+## 13. Consolidation, moved forward
+
+The plan had this after the two-week trial. The first real project moved it: 72
+entries in three minutes, and every note body still empty. The knowledge was all
+there and none of it was *readable* — `open_task` assembles a bundle live, so
+the agent side worked, while opening the project in Obsidian taught you nothing.
+A write-only vault fails the half of the design that says notes fill themselves
+up over time.
+
+`consolidate(target_id, body, repo?, expect_consolidated_through?)` writes a
+composed body into a task note, a project note, or a repository's page under
+`notes/`, and records how far the log has been folded.
+
+**The caller composes the prose.** A mechanical fold would concatenate entries,
+which is what the log already is. Consolidating means judgement — dropping what
+was superseded, keeping the newest claim with its provenance, writing what is
+now understood rather than what was said. So this verb takes the body and writes
+it; it does not generate one.
+
+**It is the only verb that rewrites anything**, which makes it the only place
+two sessions could lose each other's work. `expect_consolidated_through` is an
+optimistic check: pass what the bundle reported, and a fold composed from a
+stale read is refused rather than silently overwriting the other one.
+
+Three details found by testing it:
+
+- **A fold covers its own record.** The consolidation entry is appended *before*
+  `consolidated_through` is set. The other order leaves every consolidation's own
+  note dangling as the one outstanding entry, for ever.
+- **The boundary is inclusive.** Timestamps have second resolution, so an entry
+  written in the same second as a fold would vanish into it under a strict
+  `after` comparison. An entry on the boundary is now shown again instead —
+  duplication is cheap, and compaction losing a finding is the one thing this
+  must never do.
+- **An empty body is refused**, including one that is only whitespace.
+  Consolidating to nothing deletes what a note says.
+
+### The nudge
+
+`open_task` and `open_project` say how many entries are unfolded once there are
+five or more, and name the target and `consolidated_through` to pass. The first
+project showed the failure is not that folding is hard — it is that nothing ever
+asks for it.

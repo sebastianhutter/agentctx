@@ -395,8 +395,17 @@ func matches(e *Entry, f EntryFilter) bool {
 		}
 	}
 	if !f.Since.IsZero() {
+		// Inclusive, not strictly after. Timestamps have second resolution, so
+		// an entry written in the same second as a consolidation would
+		// otherwise vanish into it — and compaction losing a finding is the one
+		// outcome worth spending duplication to avoid. An entry on the boundary
+		// is shown again; it is never dropped.
 		ts, err := ParseTime(e.TS)
-		if err != nil || !ts.After(f.Since) {
+		if err != nil || ts.Before(f.Since) {
+			return false
+		}
+		// The fold's own record is the exception: it is always on the boundary.
+		if e.Consolidation {
 			return false
 		}
 	}

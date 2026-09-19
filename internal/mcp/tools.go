@@ -297,7 +297,9 @@ var logFindingTool = mcp.NewTool("log_finding",
 		mcp.Enum(store.SourceKinds()...),
 		mcp.Description("Where it came from. file = source at a commit; inferred = reasoned, not verified.")),
 	mcp.WithString("source_ref",
-		mcp.Description("Pointer into the source: \"modules/vpc/main.tf@abc1234\", an issue key, a URL, a page title.")),
+		mcp.Description("Pointer into the source. For source_kind=file this must pin a commit — "+
+			"\"modules/vpc/main.tf@abc1234\", not \"@origin/main\", which moves and leaves the finding "+
+			"unverifiable. For others: an issue key, a URL, a page title.")),
 	mcp.WithString("source_retrieved",
 		mcp.Description("Date you retrieved it, YYYY-MM-DD. Defaults to today. Drives the staleness marker.")),
 	mcp.WithString("scope", mcp.Enum(store.ScopeTask, store.ScopeRepo, store.ScopeProject),
@@ -413,6 +415,68 @@ func (h *handlers) logDependency(ctx context.Context, request mcp.CallToolReques
 	}
 	return mcp.NewToolResultText(fmt.Sprintf("%s %s %s.\n%s",
 		entry.Task, verb, strings.Join(entry.DependsOn, ", "), entry.Path)), nil
+}
+
+// --- consolidate ---
+
+var consolidateTool = mcp.NewTool("consolidate",
+	mcp.WithDescription(
+		"Fold logged entries into a note's body, so the vault can be read by a person and not "+
+			"only assembled by a tool.\n\n"+
+			"This is the only tool that rewrites anything. Everything else appends, which is what "+
+			"makes parallel sessions safe; this is the deliberate exception.\n\n"+
+			"You compose the body — that is the work. A mechanical fold would just concatenate "+
+			"entries; consolidating means judgement: drop what was superseded, keep the newest "+
+			"claim with its provenance, and write what is now understood rather than what was "+
+			"said. Read the entries from open_task or open_project first.\n\n"+
+			"Targets: a task id for its note, a project id for the project note, or a project id "+
+			"with repo set for that repository's page under notes/ — which is where findings from "+
+			"many tasks accumulate into something the next task in that repo reads.\n\n"+
+			"Log entries are never edited or deleted. Consolidation is compaction, so anything "+
+			"logged after the fold still comes back separately."),
+	mcp.WithString("target_id", mcp.Required(),
+		mcp.Description("A task id, or a project id.")),
+	mcp.WithString("body", mcp.Required(),
+		mcp.Description("The composed markdown body, written verbatim. Use the note's section headings.")),
+	mcp.WithString("repo",
+		mcp.Description("With a project target: fold that repository's findings into notes/<repo>.md instead.")),
+	mcp.WithString("expect_consolidated_through",
+		mcp.Description("The consolidated_through you read. Refuses if it has moved since, so two "+
+			"sessions folding at once cannot overwrite each other. Pass \"\" when the note has never "+
+			"been consolidated; omit to skip the check.")),
+)
+
+func (h *handlers) consolidate(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	svc, err := h.newService(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	targetID, err := request.RequireString("target_id")
+	if err != nil {
+		return mcp.NewToolResultError("target_id is required"), nil
+	}
+	body, err := request.RequireString("body")
+	if err != nil {
+		return mcp.NewToolResultError("body is required: it is the composed note, and this tool does not write it for you"), nil
+	}
+
+	req := service.ConsolidateRequest{
+		TargetID: targetID,
+		Repo:     request.GetString("repo", ""),
+		Body:     body,
+	}
+	if raw, ok := request.GetArguments()["expect_consolidated_through"]; ok {
+		if expect, ok := raw.(string); ok {
+			req.ExpectThrough, req.Checked = expect, true
+		}
+	}
+
+	path, err := svc.Consolidate(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText("Consolidated.\n" + path), nil
 }
 
 // --- close_task ---

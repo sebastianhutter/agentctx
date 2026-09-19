@@ -59,7 +59,12 @@ HOW TO USE IT
    later session before it starts work it cannot finish, and find --ready_only
    lists what can actually be started.
 
-7. find returns places to look, never their contents: ids, titles and why each
+7. consolidate folds logged entries into a note's body. Until it is called, a
+   note reads as empty in the vault however much has been logged against it —
+   the knowledge is all there, but only a tool can assemble it. Worth doing at
+   the end of a stretch of work, per task and per repository.
+
+8. find returns places to look, never their contents: ids, titles and why each
    matched. It searches logged text too, so a query describing a problem can
    surface the task where it was solved — then open that task to read it.
 
@@ -90,6 +95,7 @@ func CreateServer(configPath, version string, transport service.Transport) *serv
 		server.ServerTool{Tool: logDecisionTool, Handler: h.logDecision},
 		server.ServerTool{Tool: logFindingTool, Handler: h.logFinding},
 		server.ServerTool{Tool: logDependencyTool, Handler: h.logDependency},
+		server.ServerTool{Tool: consolidateTool, Handler: h.consolidate},
 		server.ServerTool{Tool: closeTaskTool, Handler: h.closeTask},
 	)
 

@@ -20,6 +20,14 @@ import (
 	"github.com/sebastianhutter/agentctx/internal/store"
 )
 
+// consolidationNudge is how many unfolded entries it takes before a bundle
+// mentions consolidating.
+//
+// Five, because the first real project produced seventy-two entries in three
+// minutes and left every note body empty: the failure is not that folding is
+// hard, it is that nothing ever asks for it.
+const consolidationNudge = 5
+
 // Marked is a log entry with the staleness verdict attached.
 type Marked struct {
 	Entry  *store.Entry
@@ -306,6 +314,17 @@ func (b *TaskBundle) Render() string {
 	}
 
 	renderSection(&out, "Since the last consolidation", b.Unconsolidated, true)
+
+	// A note whose body is empty while the log holds everything is a note
+	// nobody can read. Say so where it will be noticed, with the number, since
+	// the number is what makes it feel worth doing.
+	if n := len(b.Unconsolidated); n >= consolidationNudge {
+		fmt.Fprintf(&out, "\n> %d entries have not been folded into this note's body yet, so it reads "+
+			"as empty in the vault. If you have just finished a stretch of work, consolidate it: "+
+			"compose the body sections from the entries above and call consolidate with "+
+			"target_id `%s` (consolidated_through `%s`).\n",
+			n, b.Task.ID, b.Task.ConsolidatedThrough)
+	}
 	renderSection(&out, "What we know about this project", b.ProjectFindings, false)
 
 	repos := make([]string, 0, len(b.RepoFindings))
@@ -360,6 +379,12 @@ func (b *ProjectBundle) Render() string {
 	}
 
 	renderSection(&out, "What we know about this project", b.Findings, false)
+
+	if n := len(b.Findings); n >= consolidationNudge && strings.TrimSpace(stripEmptySections(b.ProjectBody)) == "" {
+		fmt.Fprintf(&out, "\n> %d project findings and nothing in the note body: this project reads "+
+			"as empty in the vault. Consolidate it with target_id `%s`, and each repository "+
+			"separately with repo set.\n", n, b.Project.ID)
+	}
 
 	repos := make([]string, 0, len(b.RepoNotes))
 	for repo := range b.RepoNotes {

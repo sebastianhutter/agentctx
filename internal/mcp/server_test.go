@@ -17,6 +17,7 @@ func TestToolSchemasEnforceTheContract(t *testing.T) {
 	tools := map[string]mcp.Tool{
 		"find":         findTool,
 		"open_project": openProjectTool,
+		"consolidate":  consolidateTool,
 		"open_task":    openTaskTool,
 		"log_decision": logDecisionTool,
 		"log_finding":  logFindingTool,

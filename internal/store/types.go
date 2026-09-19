@@ -83,6 +83,11 @@ type Entry struct {
 	// DependsOn lists tasks this one waits for, on a dependency entry.
 	DependsOn []string `yaml:"depends_on,omitempty"`
 
+	// Consolidation marks the note entry a fold writes about itself. Excluded
+	// from what a bundle reports as unconsolidated, since otherwise every fold
+	// leaves its own record behind as the one thing still outstanding.
+	Consolidation bool `yaml:"consolidation,omitempty"`
+
 	// Resolved marks a dependency entry that lifts the edges it names rather
 	// than declaring them. Dependencies are events, not a field: a blocker that
 	// no longer blocks is a new entry, never an edit, so how the order changed
@@ -223,6 +228,47 @@ func ResolveConfidence(sourceKind, requested string) string {
 		return requested
 	}
 	return derived
+}
+
+// movingRefs are the names a ref must not pin to. Each of them points at
+// something different tomorrow.
+var movingRefs = map[string]bool{
+	"head": true, "main": true, "master": true, "trunk": true,
+	"develop": true, "dev": true, "latest": true,
+}
+
+// ValidateFileRef checks that a file reference names a fixed point in history.
+//
+// The whole purpose of a ref is that a finding can be re-checked against what
+// it was taken from. `modules/vpc/main.tf@abc1234` can be; `…@origin/main`
+// cannot — by the time anyone looks, main has moved, and the finding is
+// unverifiable in a way nothing reports. Seen in real use within the first
+// session, which is why this is a check and not a sentence in a description.
+func ValidateFileRef(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil // optional; the finding is simply weaker without one
+	}
+
+	at := strings.LastIndex(ref, "@")
+	if at < 0 {
+		return fmt.Errorf("a file ref should pin a commit, as path@commit — %q names no revision, "+
+			"so the finding cannot be re-checked later", ref)
+	}
+
+	rev := strings.ToLower(strings.TrimSpace(ref[at+1:]))
+	if rev == "" {
+		return fmt.Errorf("a file ref should pin a commit, as path@commit — %q ends at the @", ref)
+	}
+	if i := strings.LastIndex(rev, "/"); i >= 0 {
+		// origin/main, refs/heads/main — a remote-tracking name is still a name.
+		rev = rev[i+1:]
+	}
+	if movingRefs[rev] {
+		return fmt.Errorf("%q pins a branch, which moves: use the commit it is at today "+
+			"(git rev-parse --short HEAD), so the finding can be re-checked against what you read", ref)
+	}
+	return nil
 }
 
 // ValidSourceKind reports whether kind is one agentctx knows how to weigh.
