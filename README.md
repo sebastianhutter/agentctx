@@ -28,22 +28,36 @@ schema — the only thing every agent host reads identically — do the enforcin
 The honest consequence: the first task in a new project gets a nearly empty
 bundle back. The system pays off from the second one onward.
 
+## Install
+
+macOS only. Download the DMG from the releases page, drag agentctx to
+Applications, and open it from the context menu the first time — it is not
+notarised, so a plain double-click is refused.
+
+It lives in the menu bar: start and stop the MCP server, copy its endpoint,
+open the vault, edit settings.
+
+Building it yourself needs Go and Xcode's command line tools:
+
+```bash
+make build      # binary at bin/agentctx
+make app        # bin/agentctx.app
+make dmg        # bin/agentctx.dmg
+```
+
 ## Quick start
 
 ```bash
-make build                                    # binary at bin/agentctx
-# or: make dist  — cross-compiles darwin/linux, arm64/amd64
-
 cat > ~/.agentctx/config.json <<'JSON'
-{ "vault_path": "~/Obsidian/agentctx", "state_dir": "~/.agentctx" }
+{ "vault_path": "~/Obsidian/agentctx" }
 JSON
 
-bin/agentctx doctor                           # check config, host and task resolution
+agentctx doctor                               # config, host, task resolution, registration
 
-bin/agentctx open-project proj --name "Example project" \
+agentctx open-project proj --name "Example project" \
     --jira-project PROJ --repo acme/infrastructure
 
-bin/agentctx open-task proj-142 --title "Rework the network module" \
+agentctx open-task proj-142 --title "Rework the network module" \
     --key PROJ-142 --url https://example.atlassian.net/browse/PROJ-142 \
     --repo acme/infrastructure
 ```
@@ -63,16 +77,39 @@ write path and no drift between what an agent sees and what you see.
 
 ## Register as an MCP server
 
+Two transports, and the choice matters more than it looks.
+
+**stdio — prefer this where the host supports it.** Each host spawns its own
+process, which inherits the agent's working directory and environment, so
+`open_task` can work out which task is meant from a recorded binding or the
+branch name.
+
 ```json
 {
   "mcpServers": {
-    "agentctx": { "command": "/path/to/agentctx", "args": ["serve"] }
+    "agentctx": {
+      "command": "/Applications/agentctx.app/Contents/MacOS/agentctx",
+      "args": ["serve"]
+    }
   }
 }
 ```
 
-Registering at user level (`~/.claude/`) makes it reachable from a fresh worktree,
-including one created by a task runner.
+Registering at user level (`~/.claude/`) makes it reachable from a fresh
+worktree, including one created by a task runner.
+
+**SSE — one shared server, run by the menu bar app.** Register the endpoint
+(*Copy Endpoint* in the menu puts it on the clipboard):
+
+```
+http://localhost:31124/sse
+```
+
+Convenient, and the only option for a host that cannot spawn a process. The
+catch: a server shared between clients sees no caller's working directory or
+environment, so **every call must pass `task_id`** — it cannot infer one, and it
+refuses rather than guessing. The host recorded on an entry comes from the MCP
+client's own name instead of the environment.
 
 ## Vault layout
 
@@ -100,7 +137,8 @@ only by the consolidation pass — never by an agent.
 - **Never infer the task from the working directory.** Resolution goes: explicit
   argument, then a binding recorded by an earlier call, then a tracker key in the
   branch name, then refuse. A branch is often named after a task title and carries
-  no key at all.
+  no key at all. Over the shared SSE server, where the environment belongs to the
+  menu bar app rather than the caller, inference is refused outright.
 
 ## Documentation
 

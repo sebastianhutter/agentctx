@@ -15,6 +15,31 @@ import (
 	"github.com/sebastianhutter/agentctx/internal/store"
 )
 
+// Transport says how the caller reached this process, which decides whether the
+// process environment describes the caller at all.
+//
+// This is not a detail. Over stdio the host spawns one process per session, so
+// the working directory and KEPLER_TASK_ID belong to the agent doing the work,
+// and resolving a task from them is sound. Over SSE one long-lived server —
+// started by the menu bar app — serves every client, so its environment and
+// working directory are the *menu bar app's*. Resolving a task from them would
+// attribute an entry to whatever the desktop session happened to look like,
+// which is the silent-misfiling failure the whole identity design exists to
+// prevent. So over SSE the task id must be explicit, and the caller's identity
+// comes from the MCP session rather than from getenv.
+type Transport string
+
+// Transports.
+const (
+	TransportCLI   Transport = "cli"
+	TransportStdio Transport = "stdio"
+	TransportSSE   Transport = "sse"
+)
+
+// SharesCallerEnvironment reports whether this process's environment and
+// working directory describe the agent that is calling.
+func (t Transport) SharesCallerEnvironment() bool { return t != TransportSSE }
+
 // Service holds everything the verbs need.
 type Service struct {
 	Config   *config.Config
@@ -22,6 +47,21 @@ type Service struct {
 	Assembly *bundle.Assembler
 	Resolver *identity.Resolver
 	Env      identity.Env
+
+	// Transport decides whether the environment may be trusted to identify the
+	// caller. Defaults to CLI, which is the conservative reading for a process
+	// someone started by hand.
+	Transport Transport
+
+	// CallerHost, when set, overrides host detection for a single call. Over
+	// SSE this carries the MCP client's declared name, which is the only thing
+	// that distinguishes one connected agent from another.
+	CallerHost string
+
+	// CallerSession is the caller's own session id. Over SSE the environment
+	// holds the menu bar app's, which would be stamped on entries written by
+	// every client and make the field worse than absent.
+	CallerSession string
 
 	now func() time.Time
 }
@@ -40,13 +80,43 @@ func New(cfg *config.Config) (*Service, error) {
 
 	s := store.New(cfg.ExpandedVaultPath())
 	return &Service{
-		Config:   cfg,
-		Store:    s,
-		Assembly: bundle.New(s, cfg.Stale.MaxAgeDays),
-		Resolver: identity.NewResolver(env, bindings),
-		Env:      env,
-		now:      time.Now,
+		Config:    cfg,
+		Store:     s,
+		Assembly:  bundle.New(s, cfg.Stale.MaxAgeDays),
+		Resolver:  identity.NewResolver(env, bindings),
+		Env:       env,
+		Transport: TransportCLI,
+		now:       time.Now,
 	}, nil
+}
+
+// WithTransport returns the service tagged with how the caller reached it.
+func (s *Service) WithTransport(t Transport) *Service {
+	s.Transport = t
+	return s
+}
+
+// WithCallerHost returns the service tagged with the caller's declared identity.
+func (s *Service) WithCallerHost(host string) *Service {
+	s.CallerHost = host
+	return s
+}
+
+// WithCallerSession returns the service tagged with the caller's session id.
+func (s *Service) WithCallerSession(id string) *Service {
+	s.CallerSession = id
+	return s
+}
+
+// session returns the session id to stamp on an entry.
+func (s *Service) session() string {
+	if s.Transport == TransportSSE {
+		return s.CallerSession
+	}
+	if s.CallerSession != "" {
+		return s.CallerSession
+	}
+	return s.Env.Session()
 }
 
 // SetClock overrides the clock. Tests only.
@@ -56,8 +126,39 @@ func (s *Service) SetClock(f func() time.Time) {
 	s.Assembly.Now = f
 }
 
-// host is the value stamped on every entry this process writes.
-func (s *Service) host() string { return s.Env.Host(s.Config.Host) }
+// host is the value stamped on every entry this call writes.
+//
+// Over SSE the process environment belongs to the menu bar app, so detection
+// would stamp every entry with the same wrong answer and the question the log
+// is meant to settle — which hosts actually write anything — could not be
+// asked. The MCP client's declared name is used instead.
+func (s *Service) host() string {
+	if s.Transport == TransportSSE {
+		if h := strings.TrimSpace(s.CallerHost); h != "" {
+			return h
+		}
+		if h := strings.TrimSpace(s.Config.Host); h != "" {
+			return h
+		}
+		return "sse-client"
+	}
+	return s.Env.Host(s.Config.Host)
+}
+
+// resolveTask resolves a task id, refusing environment-based resolution when
+// the environment does not describe the caller.
+func (s *Service) resolveTask(explicit string) (identity.Resolution, error) {
+	if id := strings.TrimSpace(explicit); id != "" {
+		return identity.Resolution{TaskID: id, Via: "argument"}, nil
+	}
+	if !s.Transport.SharesCallerEnvironment() {
+		return identity.Resolution{}, fmt.Errorf("task_id is required over this transport: " +
+			"the server is shared between clients, so its working directory and environment " +
+			"describe the machine it runs on rather than your session. Pass task_id explicitly " +
+			"(a stdio registration can infer it; an SSE one cannot)")
+	}
+	return s.Resolver.Resolve("")
+}
 
 // --- open_project ---
 
@@ -104,7 +205,7 @@ func (s *Service) OpenProject(req OpenProjectRequest) (*bundle.ProjectBundle, er
 
 		if _, err := s.Store.Append(&store.Entry{
 			Kind: store.KindOpened, Project: id, Scope: store.ScopeProject,
-			Host: s.host(), Session: s.Env.Session(),
+			Host: s.host(), Session: s.session(),
 			Body: fmt.Sprintf("Project %q created.", id),
 		}); err != nil {
 			return nil, err
@@ -147,7 +248,7 @@ type OpenTaskRequest struct {
 // time — and keeps a single writer per file, which is what makes parallel
 // sessions on a synced vault safe.
 func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
-	resolution, err := s.Resolver.Resolve(req.TaskID)
+	resolution, err := s.resolveTask(req.TaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +278,7 @@ func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
 			ID: taskID, Project: project, Source: source,
 			SourceKey: req.Seed.SourceKey, SourceURL: req.Seed.SourceURL,
 			Title: req.Seed.Title, Repos: req.Seed.Repos,
-			KeplerTaskID: s.Env.KeplerTaskID(),
+			KeplerTaskID: s.keplerTaskID(),
 		}
 		if err := s.Store.CreateTask(note); err != nil {
 			return nil, err
@@ -192,15 +293,21 @@ func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
 	}
 	if _, err := s.Store.Append(&store.Entry{
 		Kind: store.KindOpened, Task: taskID, Project: project, Scope: store.ScopeTask,
-		Host: s.host(), Session: s.Env.Session(), Body: openedBody,
+		Host: s.host(), Session: s.session(), Body: openedBody,
 	}); err != nil {
 		return nil, err
 	}
 
 	// Bind so later calls in this worktree or Kepler task need no argument. A
 	// cache: failing to write it costs an explicit argument, not correctness.
-	if err := s.Resolver.RememberTask(taskID); err != nil {
-		return nil, fmt.Errorf("record binding: %w", err)
+	//
+	// Skipped over SSE, where the worktree and Kepler id on offer are the menu
+	// bar app's: binding them would teach the cache a wrong answer, and a wrong
+	// binding is worse than none because it resolves silently.
+	if s.Transport.SharesCallerEnvironment() {
+		if err := s.Resolver.RememberTask(taskID); err != nil {
+			return nil, fmt.Errorf("record binding: %w", err)
+		}
 	}
 
 	b, err := s.Assembly.Task(project, taskID)
@@ -236,6 +343,15 @@ func (s *Service) resolveProject(taskID string, req OpenTaskRequest) (string, er
 		return "", fmt.Errorf("%w — pass project explicitly, or create it with open_project", err)
 	}
 	return project, nil
+}
+
+// keplerTaskID returns the Kepler task uuid when this process shares the
+// caller's environment, and nothing otherwise.
+func (s *Service) keplerTaskID() string {
+	if !s.Transport.SharesCallerEnvironment() {
+		return ""
+	}
+	return s.Env.KeplerTaskID()
 }
 
 func describeSeed(seed *Seed) string {
@@ -294,7 +410,7 @@ func (s *Service) LogDecision(req LogDecisionRequest) (*store.Entry, error) {
 
 	entry := &store.Entry{
 		Kind: store.KindDecision, Task: taskID, Project: project, Scope: store.ScopeTask,
-		Host: s.host(), Session: s.Env.Session(), Body: body.String(),
+		Host: s.host(), Session: s.session(), Body: body.String(),
 	}
 	if _, err := s.Store.Append(entry); err != nil {
 		return nil, err
@@ -345,7 +461,7 @@ func (s *Service) LogFinding(req LogFindingRequest) (*store.Entry, error) {
 
 	entry := &store.Entry{
 		Kind: store.KindFinding, Scope: scope, Repo: req.Repo,
-		Host: s.host(), Session: s.Env.Session(),
+		Host: s.host(), Session: s.session(),
 		Source:     &req.Source,
 		Confidence: store.ResolveConfidence(req.Source.Kind, req.Confidence),
 		Body:       strings.TrimSpace(req.Finding),
@@ -431,7 +547,7 @@ func (s *Service) CloseTask(req CloseTaskRequest) (*store.Entry, error) {
 
 	entry := &store.Entry{
 		Kind: store.KindClosed, Task: taskID, Project: project, Scope: store.ScopeTask,
-		Host: s.host(), Session: s.Env.Session(), Body: strings.TrimSpace(req.Summary),
+		Host: s.host(), Session: s.session(), Body: strings.TrimSpace(req.Summary),
 	}
 	if _, err := s.Store.Append(entry); err != nil {
 		return nil, err
@@ -441,7 +557,7 @@ func (s *Service) CloseTask(req CloseTaskRequest) (*store.Entry, error) {
 
 // locateTask resolves a task id and finds the project holding it.
 func (s *Service) locateTask(explicit string) (taskID, project string, err error) {
-	resolution, err := s.Resolver.Resolve(explicit)
+	resolution, err := s.resolveTask(explicit)
 	if err != nil {
 		return "", "", err
 	}

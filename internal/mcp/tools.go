@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/sebastianhutter/agentctx/internal/config"
 	"github.com/sebastianhutter/agentctx/internal/service"
@@ -16,17 +17,52 @@ import (
 // the config path a caller passed on the command line is the one that is used.
 type handlers struct {
 	configPath string
+	transport  service.Transport
 }
 
 // newService loads configuration per call. A call is rare and a vault is small,
 // so this costs nothing and means an edited config takes effect without
 // restarting every host that has the server registered.
-func (h *handlers) newService() (*service.Service, error) {
+//
+// The context is not decoration: over SSE it carries the MCP session, and the
+// session carries the name the client announced at initialize. That name is the
+// only thing distinguishing two agents connected to one shared server, and it
+// is what every entry written during the call is stamped with.
+func (h *handlers) newService(ctx context.Context) (*service.Service, error) {
 	cfg, err := config.Load(h.configPath)
 	if err != nil {
 		return nil, err
 	}
-	return service.New(cfg)
+	svc, err := service.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	name, session := callerIdentity(ctx)
+	return svc.WithTransport(h.transport).WithCallerHost(name).WithCallerSession(session), nil
+}
+
+// callerIdentity returns the connected client's declared name and its session
+// id, or empty strings when the transport carries neither.
+func callerIdentity(ctx context.Context) (name, sessionID string) {
+	session := server.ClientSessionFromContext(ctx)
+	if session == nil {
+		return "", ""
+	}
+	sessionID = session.SessionID()
+
+	withInfo, ok := session.(server.SessionWithClientInfo)
+	if !ok {
+		return "", sessionID
+	}
+	info := withInfo.GetClientInfo()
+	switch {
+	case info.Name == "":
+		return "", sessionID
+	case info.Version != "":
+		return info.Name + "/" + info.Version, sessionID
+	default:
+		return info.Name, sessionID
+	}
 }
 
 // --- open_project ---
@@ -55,7 +91,7 @@ var openProjectTool = mcp.NewTool("open_project",
 )
 
 func (h *handlers) openProject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	svc, err := h.newService()
+	svc, err := h.newService(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -110,7 +146,7 @@ var openTaskTool = mcp.NewTool("open_task",
 )
 
 func (h *handlers) openTask(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	svc, err := h.newService()
+	svc, err := h.newService(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -158,7 +194,7 @@ var logDecisionTool = mcp.NewTool("log_decision",
 )
 
 func (h *handlers) logDecision(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	svc, err := h.newService()
+	svc, err := h.newService(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -219,7 +255,7 @@ var logFindingTool = mcp.NewTool("log_finding",
 )
 
 func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	svc, err := h.newService()
+	svc, err := h.newService(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -273,7 +309,7 @@ var closeTaskTool = mcp.NewTool("close_task",
 )
 
 func (h *handlers) closeTask(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	svc, err := h.newService()
+	svc, err := h.newService(ctx)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

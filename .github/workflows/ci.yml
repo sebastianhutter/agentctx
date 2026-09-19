@@ -14,7 +14,9 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # macOS only: the menu bar app is Fyne, which binds to Cocoa, so the build
+    # needs CGO and the macOS SDK. That matches where agentctx is used.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

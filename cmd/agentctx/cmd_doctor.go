@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -76,6 +78,8 @@ This command is how you check without writing one.`,
 		}
 		fmt.Printf("  bindings:   %d recorded\n", len(bindings.Entries))
 
+		printRegistration()
+
 		if len(problems) > 0 {
 			return errors.New("configuration is not usable yet")
 		}
@@ -103,6 +107,39 @@ This command is how you check without writing one.`,
 		}
 		return nil
 	},
+}
+
+// printRegistration shows how to register this exact binary.
+//
+// It resolves its own path rather than printing a placeholder, because the
+// answer differs by install method: inside an .app bundle the binary lives at a
+// path nobody would guess, and this command is what the bundle runs when it is
+// double-clicked.
+func printRegistration() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+
+	fmt.Println("\nRegistration")
+	fmt.Printf("  binary:     %s\n", exe)
+	fmt.Println("\n  Register as an MCP server (e.g. in ~/.claude/settings.json or")
+	fmt.Println("  Claude Desktop's config), so every host spawns its own process:")
+	fmt.Printf(`
+    {
+      "mcpServers": {
+        "agentctx": { "command": %q, "args": ["serve"] }
+      }
+    }
+`, exe)
+
+	if onPath, err := exec.LookPath("agentctx"); err != nil || onPath != exe {
+		fmt.Println("\n  For the command line, put it on your PATH:")
+		fmt.Printf("    mkdir -p ~/.local/bin && ln -sf %q ~/.local/bin/agentctx\n", exe)
+	}
 }
 
 func orUnset(s string) string {

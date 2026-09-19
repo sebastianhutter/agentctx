@@ -4,40 +4,38 @@ BUILD_DIR := bin
 VERSION ?= dev
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build test test-v lint dist clean tidy install
+# CGO is required: the menu bar app is Fyne, which binds to Cocoa. That also
+# makes this macOS-only, which matches where it is used.
+CGO_ENABLED := 1
+
+.PHONY: all build test test-v lint app dmg clean tidy
 
 all: build
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/agentctx
+	CGO_ENABLED=$(CGO_ENABLED) go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/agentctx
 
 test:
-	go test -race -count=1 ./...
+	CGO_ENABLED=$(CGO_ENABLED) go test -race -count=1 ./...
 
 test-v:
-	go test -race -count=1 -v ./...
+	CGO_ENABLED=$(CGO_ENABLED) go test -race -count=1 -v ./...
 
 lint:
 	golangci-lint run ./...
 
-# dist cross-compiles every supported target. Pure Go with no CGO, so this needs
-# nothing but the toolchain — one runner builds all of them.
-PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
+# macOS .app bundle — a menu bar app, installed by dragging it to Applications.
+app: build
+	@echo "Building macOS .app bundle..."
+	VERSION=$(VERSION) ./scripts/build-app.sh
 
-dist:
-	@mkdir -p $(BUILD_DIR)
-	@for platform in $(PLATFORMS); do \
-		os=$${platform%/*}; arch=$${platform#*/}; \
-		echo "building $(BINARY)-$$os-$$arch"; \
-		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 \
-			go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-$$os-$$arch ./cmd/agentctx || exit 1; \
-	done
+# macOS DMG installer: the app plus an Applications symlink.
+dmg: app
+	@echo "Building DMG installer..."
+	./scripts/build-dmg.sh
 
 clean:
 	rm -rf $(BUILD_DIR)
 
 tidy:
 	go mod tidy
-
-install: build
-	install -m 0755 $(BUILD_DIR)/$(BINARY) $(HOME)/.local/bin/$(BINARY)

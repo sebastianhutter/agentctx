@@ -98,6 +98,10 @@ one.
   the plan; a wrong guess attaches entries to the wrong task silently.
 - **stdout belongs to the MCP protocol.** All logging goes to stderr via
   `log/slog`. A stray `fmt.Println` corrupts a stdio session.
+- **The environment describes the caller only over stdio and the CLI.** The SSE
+  server is shared, so its working directory, `KEPLER_TASK_ID` and session id are
+  the menu bar app's. Anything reading them must go through `service.Transport`;
+  see §9 of the implementation plan.
 
 ---
 
@@ -112,4 +116,5 @@ Inherited from `local-rag`, so both repositories read the same way:
 - `log/slog` for logging, never `fmt.Print`
 - Tests live in `_test.go` files beside the code they test, and run against a
   temp-dir vault — never against the real one
-- Pure Go, no CGO. `make build`, `make test`, `make lint`
+- macOS only, CGO enabled (the menu bar app is Fyne). `make build`, `make test`,
+  `make app`, `make dmg`

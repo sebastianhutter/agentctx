@@ -32,12 +32,12 @@ already (Jira, GitLab, Kepler, `local-rag`).
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | **Go**, single static binary, pure Go (no CGO) | Matches `local-rag`. Nothing here needs SQLite, vectors or Ollama, so `make build` stays trivial and cross-platform |
+| D1 | **Go**, single binary, macOS only, CGO for the menu bar app | Matches `local-rag`, including its build. Was pure Go until the menu bar app arrived — see §8 |
 | D2 | **Configuration is one JSON file** at `~/.agentctx/config.json`, defaults applied for absent fields, `~` expansion, annotated `configs/config.example.json` | Direct copy of `local-rag`'s `internal/config` shape |
 | D3 |  **Dedicated vault**, beside the main one (real path in the local config only; `~/Obsidian/agentctx` in examples) | Already exists and is empty. Being a separate vault, the notes' `agent/` prefix is dropped: project folders sit at the vault root |
 | D4 | **agentctx has no external interfaces.** No Jira client, no GitLab client, no `local-rag` client, no network calls at all | The agent calling the verb already has those MCPs. Required tool fields make it supply the facts with provenance. One less credential store, one less failure mode, and the tool contract does the work instead of a second integration surface |
 | D5 | **Hosts in v1: Claude Code (direct and inside Kepler) + Claude Desktop** | Claude Code captures, Desktop reads and consolidates. Hooks are therefore fair game. The MCP schema stays the contract, so OpenCode/Codex cost nothing to add later — but v1 makes no sacrifices for them |
-| D6 | **v1 surface: stdio MCP + CLI**, one binary, two front ends over one core | The CLI is what a `SessionStart` hook calls and what makes the thing debuggable by hand. Web UI deferred (the notes say build it after the MCP) |
+| D6 | **v1 surface: menu bar app + MCP (stdio and SSE) + CLI**, one binary, three front ends over one core | The menu bar app owns the shared server's lifetime and is where the web interface will be opened from. The CLI is what a `SessionStart` hook calls. See §8 for what the SSE transport costs |
 | D7 | **The log is the only write surface.** Note *bodies* are written solely by the consolidation pass | Straight from the notes. Preserved without change |
 | D8 | **`open_task` never rewrites the task note.** It appends an `opened` log entry | New — see §4.3. Removes the last-write-wins risk on a SynologyDrive-synced file entirely |
 | D9 | **Confidence is derived from `source.kind`**, with an agent-supplied value allowed only to lower it | The notes' own reasoning: derived is harder to game. Precedence: `file` > `gitlab-mr` > `jira` > `confluence` > `slack` > `conversation` > `inferred` |
@@ -46,8 +46,9 @@ already (Jira, GitLab, Kepler, `local-rag`).
 ### Deferred to v2, deliberately
 
 Consolidation verb and Desktop skill · `Stop` and `PreCompact` hooks · the
-localhost web UI · near-duplicate supersede (`replaces:`) · a derived SQLite index
-· any external interface, if D4 ever proves too austere.
+localhost web UI, opened from the menu bar item that is already there ·
+near-duplicate supersede (`replaces:`) · a derived SQLite index · any external
+interface, if D4 ever proves too austere.
 
 ---
 
@@ -445,3 +446,61 @@ if a name actually slips.
 Phase 4 (register in `~/.claude/`, `SessionStart` hook, first real project, one
 Bases view, add the vault to `local-rag`) and then the two-week trial. The v2 list
 in §2 is unchanged.
+
+
+---
+
+## 9. The menu bar app, and what the SSE transport costs
+
+Added after phases 0–3, to match how `local-rag` is run: a menu bar app that
+owns a long-lived MCP server over SSE, so a client registers one endpoint —
+`http://localhost:31124/sse` — instead of being configured to spawn a process.
+The menu starts, stops and restarts it, copies the endpoint, shows what is in
+the vault, and has the settings dialog. The web interface, when it exists, gets
+opened from the item already sitting in that menu.
+
+This reverses the design note's "stdio, not a daemon", and the reasoning there
+was not wrong: file-per-entry needs no coordination, so a daemon buys no
+locking or caching worth having. What it buys is ergonomics — one registration,
+a visible on/off, somewhere for the web UI to live — which is a fair trade as
+long as the cost is understood, because the cost is not obvious.
+
+**A shared server cannot see who is calling it.** Over stdio the host spawns one
+process per session, so the working directory and `KEPLER_TASK_ID` belong to the
+agent doing the work, and `open_task` can resolve a task from a binding or the
+branch name. Over SSE one process serves everyone, and its environment is the
+*menu bar app's*. Resolving a task from it would attribute entries to whatever
+the desktop session happened to look like — silently, and in exactly the way the
+identity design exists to prevent.
+
+So `service.Transport` makes the difference explicit, and over SSE:
+
+- **`task_id` is required.** Environment resolution refuses, with an error that
+  says why and what to pass.
+- **The host is the MCP client's declared name** (`claude-ai/0.1.0`), taken from
+  the session, not from `getenv`. Without this every entry would carry the same
+  wrong host and the drift measurement could not be made at all.
+- **The session id is the MCP session's**, for the same reason.
+- **No binding is recorded**, and `kepler_task_id` is left empty rather than
+  filled with the server's own.
+
+Each of those is a test. The practical advice, which the settings dialog and the
+server instructions both give: **prefer a stdio registration where a host
+supports one** — it is the transport that can work out what you mean. Use the
+shared endpoint for hosts that only speak HTTP, and pass `task_id`.
+
+### Build
+
+macOS only now, and CGO-enabled, because the menu bar app is Fyne and Fyne binds
+to Cocoa. The cross-compiled linux and amd64 targets are gone: they were free
+while the binary was pure Go, and they are not free now, and nothing was using
+them. `make app` and `make dmg` produce the bundle and installer; CI and the
+release workflow run on `macos-latest`, as `local-rag`'s do.
+
+One thing worth knowing about the DMG build, because it cost an hour: the
+one-shot `hdiutil create -srcfolder` that `local-rag` uses fails with
+"Resource busy" when the staging folder holds a Mach-O binary that macOS decides
+to scan while hdiutil is reading it. Measured directly — 25MB of random bytes
+images fine, the same bytes marked as an executable do not. `build-dmg.sh`
+therefore creates a read/write image, copies into the mounted volume with `cp`,
+detaches with retries, and converts. Slower by a second and reliable.

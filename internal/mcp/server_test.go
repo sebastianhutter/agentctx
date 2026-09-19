@@ -6,6 +6,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
+	"github.com/sebastianhutter/agentctx/internal/service"
 	"github.com/sebastianhutter/agentctx/internal/store"
 )
 
@@ -97,7 +98,7 @@ func TestServerInstructionsStateTheBoundary(t *testing.T) {
 }
 
 func TestCreateServerRegistersEveryVerb(t *testing.T) {
-	if s := CreateServer("", "test"); s == nil {
+	if s := CreateServer("", "test", service.TransportStdio); s == nil {
 		t.Fatal("CreateServer returned nil")
 	}
 }

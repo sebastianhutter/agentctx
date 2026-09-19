@@ -390,3 +390,110 @@ func mustOpenTask(t *testing.T, s *Service) {
 		t.Fatalf("OpenTask: %v", err)
 	}
 }
+
+// Over SSE one long-lived server serves every client, so the process
+// environment is the menu bar app's rather than the caller's. Inferring a task
+// from it would attribute entries to whatever the desktop looked like — the
+// exact silent misfiling the identity design exists to prevent.
+func TestSSETransportRefusesEnvironmentResolution(t *testing.T) {
+	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid-of-the-desktop-session"})
+	openProject(t, s)
+	mustOpenTask(t, s)
+
+	// A binding exists now, and over stdio it would resolve with no argument.
+	if _, err := s.LogDecision(LogDecisionRequest{Decision: "d", Rationale: "r"}); err != nil {
+		t.Fatalf("stdio-style resolution should work: %v", err)
+	}
+
+	s.WithTransport(TransportSSE)
+
+	_, err := s.LogDecision(LogDecisionRequest{Decision: "d", Rationale: "r"})
+	if err == nil {
+		t.Fatal("LogDecision resolved a task from the environment over SSE")
+	}
+	if !strings.Contains(err.Error(), "task_id is required") {
+		t.Errorf("refusal does not say what to pass: %v", err)
+	}
+
+	// Explicit still works.
+	if _, err := s.LogDecision(LogDecisionRequest{
+		TaskID: "proj-142", Decision: "d", Rationale: "r",
+	}); err != nil {
+		t.Fatalf("explicit task id over SSE: %v", err)
+	}
+}
+
+// Host detection reads the environment, which over SSE belongs to the menu bar
+// app. The MCP client's declared name is the only thing that tells two
+// connected agents apart, so it has to win.
+func TestSSETransportStampsTheClientAsHost(t *testing.T) {
+	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid", "CLAUDECODE": "1"})
+	openProject(t, s)
+	mustOpenTask(t, s)
+
+	s.WithTransport(TransportSSE).WithCallerHost("claude-desktop")
+
+	entry, err := s.LogDecision(LogDecisionRequest{TaskID: "proj-142", Decision: "d", Rationale: "r"})
+	if err != nil {
+		t.Fatalf("LogDecision: %v", err)
+	}
+	if entry.Host != "claude-desktop" {
+		t.Errorf("host = %q, want the connected client rather than the server's environment", entry.Host)
+	}
+
+	// With no client name at all, say so rather than claiming to be the host
+	// the server process happens to sit in.
+	s.WithCallerHost("")
+	entry, err = s.LogDecision(LogDecisionRequest{TaskID: "proj-142", Decision: "d2", Rationale: "r"})
+	if err != nil {
+		t.Fatalf("LogDecision: %v", err)
+	}
+	if entry.Host != "sse-client" {
+		t.Errorf("host = %q, want sse-client", entry.Host)
+	}
+}
+
+// A task note created over SSE must not claim the menu bar app's Kepler id.
+func TestSSETransportDoesNotRecordTheServersKeplerTask(t *testing.T) {
+	s := newService(t, map[string]string{"KEPLER_TASK_ID": "uuid-of-the-desktop-session"})
+	openProject(t, s)
+	s.WithTransport(TransportSSE)
+
+	b, err := s.OpenTask(OpenTaskRequest{
+		TaskID: "proj-150", Seed: &Seed{Title: "Example task"},
+	})
+	if err != nil {
+		t.Fatalf("OpenTask: %v", err)
+	}
+	if b.Task.KeplerTaskID != "" {
+		t.Errorf("kepler_task_id = %q, want empty — that uuid is the server's, not the caller's", b.Task.KeplerTaskID)
+	}
+}
+
+// The session id has the same problem as the host: over SSE the environment
+// holds the menu bar app's, which would be stamped on every client's entries.
+func TestSSETransportStampsTheCallersSession(t *testing.T) {
+	s := newService(t, map[string]string{"KEPLER_SESSION_ID": "the-desktop-session"})
+	openProject(t, s)
+	mustOpenTask(t, s)
+
+	s.WithTransport(TransportSSE).WithCallerSession("mcp-session-42")
+
+	entry, err := s.LogDecision(LogDecisionRequest{TaskID: "proj-142", Decision: "d", Rationale: "r"})
+	if err != nil {
+		t.Fatalf("LogDecision: %v", err)
+	}
+	if entry.Session != "mcp-session-42" {
+		t.Errorf("session = %q, want the caller's", entry.Session)
+	}
+
+	// With nothing from the caller, record nothing rather than the server's.
+	s.WithCallerSession("")
+	entry, err = s.LogDecision(LogDecisionRequest{TaskID: "proj-142", Decision: "d2", Rationale: "r"})
+	if err != nil {
+		t.Fatalf("LogDecision: %v", err)
+	}
+	if entry.Session != "" {
+		t.Errorf("session = %q, want empty rather than the server's own", entry.Session)
+	}
+}

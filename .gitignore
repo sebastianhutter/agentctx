@@ -11,3 +11,7 @@ config.local.json
 
 # macOS
 .DS_Store
+
+# macOS build artifacts
+*.app/
+*.dmg

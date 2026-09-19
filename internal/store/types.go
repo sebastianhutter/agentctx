@@ -62,7 +62,7 @@ const (
 // has nothing to work with.
 type Source struct {
 	Kind      string `yaml:"kind"`
-	Ref       string `yaml:"ref"`
+	Ref       string `yaml:"ref,omitempty"`
 	Retrieved string `yaml:"retrieved"`
 }
 

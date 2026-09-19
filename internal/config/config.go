@@ -41,6 +41,17 @@ type ConfidenceConfig struct {
 	DeriveFromSource bool `json:"derive_from_source"`
 }
 
+// GUIConfig holds settings for the menu bar app.
+//
+// The MCP port defaults to 31124 rather than anything rounder because 31123 is
+// local-rag's: two menu bar apps on one machine should not fight over a port,
+// and the failure if they do is a server that silently does not start.
+type GUIConfig struct {
+	AutoStartMCP bool `json:"auto_start_mcp"`
+	MCPPort      int  `json:"mcp_port"`
+	StartOnLogin bool `json:"start_on_login"`
+}
+
 // Config holds all application configuration.
 type Config struct {
 	// VaultPath is the dedicated agentctx vault — not the main Obsidian vault.
@@ -58,6 +69,7 @@ type Config struct {
 
 	Stale      StaleConfig      `json:"stale"`
 	Confidence ConfidenceConfig `json:"confidence"`
+	GUI        GUIConfig        `json:"gui"`
 }
 
 // ExpandedVaultPath returns vault_path with ~ expanded.
@@ -88,6 +100,10 @@ func (c *Config) Validate() []error {
 
 	if c.Stale.MaxAgeDays < 0 {
 		errs = append(errs, fmt.Errorf("stale.max_age_days is negative (%d)", c.Stale.MaxAgeDays))
+	}
+
+	if c.GUI.MCPPort < 1024 || c.GUI.MCPPort > 65535 {
+		errs = append(errs, fmt.Errorf("gui.mcp_port %d is outside the usable range 1024-65535", c.GUI.MCPPort))
 	}
 
 	return errs
@@ -146,6 +162,7 @@ func Save(cfg *Config, path string) error {
 	existing["host"] = cfg.Host
 	existing["stale"] = cfg.Stale
 	existing["confidence"] = cfg.Confidence
+	existing["gui"] = cfg.GUI
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -173,6 +190,11 @@ func defaults() *Config {
 		Host:       "",
 		Stale:      StaleConfig{MaxAgeDays: 30},
 		Confidence: ConfidenceConfig{DeriveFromSource: true},
+		GUI: GUIConfig{
+			AutoStartMCP: true,
+			MCPPort:      31124,
+			StartOnLogin: false,
+		},
 	}
 }
 

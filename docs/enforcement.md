@@ -63,6 +63,11 @@ Every entry carries `host`. Inside a task runner that value is detected from the
 environment rather than configured, because a runner and a plain session share one
 user-level MCP registration and a hand-set variable cannot tell them apart.
 
+Over the shared SSE server the environment is the menu bar app's, so the name the
+MCP client announced at `initialize` is used instead. Without that substitution
+every entry written through the shared endpoint would carry one identical wrong
+host, and this measurement could not be made at all.
+
 After a couple of weeks the log answers the only question that matters: which
 hosts produced entries, and which opened tasks and wrote nothing. If the entries
 are never read back, the write side was never the problem.

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sebastianhutter/agentctx/internal/config"
+	"github.com/sebastianhutter/agentctx/internal/gui"
 	"github.com/sebastianhutter/agentctx/internal/service"
 )
 
@@ -26,7 +27,14 @@ var rootCmd = &cobra.Command{
 dedicated Obsidian vault, with provenance and a scope.
 
 Findings scoped to a repository or a project outlive the task that discovered
-them — that is the point. Run "agentctx serve" to expose the verbs over MCP.`,
+them — that is the point.
+
+Run with no arguments to start the menu bar app, which runs the MCP server for
+every client to share. Run "agentctx serve" for a stdio server instead, one per
+host, which can work out which task it is being asked about.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return gui.Run(configPath, version)
+	},
 	// main prints the error; cobra printing it too would double every message.
 	SilenceUsage:  true,
 	SilenceErrors: true,

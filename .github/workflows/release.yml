@@ -19,7 +19,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -27,11 +27,9 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
       - run: make test
 
-  # One job builds every target: agentctx is pure Go with no CGO, so cross
-  # compilation needs nothing but the toolchain. No per-OS runner, no matrix.
-  build:
+  build-macos:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -47,36 +45,47 @@ jobs:
             echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build all targets
-        run: make dist VERSION=${{ steps.version.outputs.VERSION }}
+      - name: Build binary
+        run: make build VERSION=${{ steps.version.outputs.VERSION }}
 
       - name: Check the version was stamped
         run: |
-          # The build is useless for bug reports if --version says "dev", and a
-          # broken ldflags path fails silently otherwise.
-          got=$(./bin/agentctx-linux-amd64 --version)
+          # A broken ldflags path fails silently and ships binaries that all
+          # claim to be "dev", which makes a bug report unanswerable.
+          got=$(./bin/agentctx --version)
           echo "$got"
           case "$got" in
             *"${{ steps.version.outputs.VERSION }}"*) ;;
             *) echo "version not stamped into the binary"; exit 1 ;;
           esac
 
+      - name: Build .app bundle
+        run: make app VERSION=${{ steps.version.outputs.VERSION }}
+
+      - name: Build DMG
+        run: make dmg VERSION=${{ steps.version.outputs.VERSION }}
+
+      - name: Rename binary
+        run: mv bin/agentctx bin/agentctx-darwin-arm64
+
+      - name: Zip .app bundle
+        run: cd bin && zip -qr agentctx-darwin-arm64.app.zip agentctx.app
+
       - name: Checksums
-        run: cd bin && sha256sum agentctx-* > SHA256SUMS && cat SHA256SUMS
+        run: cd bin && shasum -a 256 agentctx-darwin-arm64 agentctx-darwin-arm64.app.zip agentctx.dmg > SHA256SUMS && cat SHA256SUMS
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: binaries
+          name: macos-arm64
           path: |
             bin/agentctx-darwin-arm64
-            bin/agentctx-darwin-amd64
-            bin/agentctx-linux-amd64
-            bin/agentctx-linux-arm64
+            bin/agentctx-darwin-arm64.app.zip
+            bin/agentctx.dmg
             bin/SHA256SUMS
 
   release:
-    needs: [build]
+    needs: [build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -95,10 +104,9 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
+            artifacts/agentctx.dmg \
+            artifacts/agentctx-darwin-arm64.app.zip \
             artifacts/agentctx-darwin-arm64 \
-            artifacts/agentctx-darwin-amd64 \
-            artifacts/agentctx-linux-amd64 \
-            artifacts/agentctx-linux-arm64 \
             artifacts/SHA256SUMS
 
       - name: List artifacts (manual run)

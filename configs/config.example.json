@@ -7,5 +7,10 @@
     },
     "confidence": {
         "derive_from_source": true
+    },
+    "gui": {
+        "auto_start_mcp": true,
+        "mcp_port": 31124,
+        "start_on_login": false
     }
 }
