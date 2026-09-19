@@ -1,0 +1,13 @@
+# Build output
+bin/
+
+# Local configuration — holds the real vault path; never commit it
+config.json
+config.local.json
+
+# Go
+*.test
+*.out
+
+# macOS
+.DS_Store

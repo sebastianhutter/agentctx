@@ -1,0 +1,11 @@
+{
+    "vault_path": "~/Obsidian/agentctx",
+    "state_dir": "~/.agentctx",
+    "host": "",
+    "stale": {
+        "max_age_days": 30
+    },
+    "confidence": {
+        "derive_from_source": true
+    }
+}
