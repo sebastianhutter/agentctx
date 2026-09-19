@@ -74,13 +74,20 @@ ignored.
 
 | Source kind | Derived | Why |
 |---|---|---|
-| `file`, `gitlab-mr` | high | names a commit or a diff, so it can be re-checked exactly |
-| `jira` | medium | a real record, but one that changes under you |
+| `file`, `merge-request` | high | names a commit or a diff, so it can be re-checked exactly |
+| `issue` | medium | a real record, but one that changes under you |
 | `document` | medium | anything you can open again at a named place: a vault note, a PDF, a spec, a plan. Ranks below `file` because a plan describing code is only as good as the code it was written from |
 | `confluence` | medium | a wiki page — re-readable, and it changes silently |
 | `web` | low | a URL rots, paywalls, or changes with no version and no notice |
 | `slack`, `conversation` | low | someone said so; unrecheckable afterwards |
 | `inferred` | low | reasoned, not verified — never presented as fact |
+
+Neither `merge-request` nor `issue` names a forge. A GitLab merge request and a
+GitHub pull request are the same object — same worth, same mutability — and the
+ref says which one it is, so a kind per forge would only have given an agent a
+word to hesitate over. `pull-request`, `gitlab-mr`, `jira` and friends are
+accepted on input and stored as the canonical kind, so a filter over the log
+does not show one thing under two names.
 
 A kind exists only where it changes one of three answers: what the claim is
 worth, whether it will have moved since, and which tool re-checks it. Two

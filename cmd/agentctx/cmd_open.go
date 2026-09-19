@@ -98,7 +98,7 @@ func init() {
 	openTaskCmd.Flags().StringVar(&openTaskID, "task", "", "Task id (alternative to the positional argument)")
 	openTaskCmd.Flags().StringVar(&openProjectID, "project", "", "Project id, when the task key has no known prefix")
 	openTaskCmd.Flags().StringVar(&openSeedTitle, "title", "", "Task title — required to create a task note")
-	openTaskCmd.Flags().StringVar(&openSeedSource, "source", "", "jira | gitlab | manual")
+	openTaskCmd.Flags().StringVar(&openSeedSource, "source", "", "jira | github | gitlab | manual")
 	openTaskCmd.Flags().StringVar(&openSeedKey, "key", "", "Tracker key, e.g. PROJ-142")
 	openTaskCmd.Flags().StringVar(&openSeedURL, "url", "", "Link to the issue or merge request")
 	openTaskCmd.Flags().StringSliceVar(&openSeedRepos, "repo", nil, "Repository this task touches (repeatable)")

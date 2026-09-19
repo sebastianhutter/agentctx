@@ -33,9 +33,18 @@ const (
 // Source kinds, ordered by how much a claim from each is worth. See
 // DeriveConfidence.
 const (
-	SourceFile         = "file"
-	SourceGitLabMR     = "gitlab-mr"
-	SourceJira         = "jira"
+	SourceFile = "file"
+
+	// SourceMergeRequest is a proposed change under review, whatever the forge
+	// calls it. GitLab says merge request, GitHub says pull request; they are
+	// the same object, worth the same, mutable in the same way, and the ref
+	// says which one it is. A kind per forge would only have given an agent a
+	// word to hesitate over.
+	SourceMergeRequest = "merge-request"
+
+	// SourceIssue is a tracker issue — Jira, GitHub, Linear. Same reasoning.
+	SourceIssue = "issue"
+
 	SourceDocument     = "document"
 	SourceConfluence   = "confluence"
 	SourceWeb          = "web"
@@ -43,6 +52,31 @@ const (
 	SourceConversation = "conversation"
 	SourceInferred     = "inferred"
 )
+
+// sourceAliases map what a caller may reasonably say to what is stored.
+//
+// Accepted on input, canonical on storage: an agent writes whatever its forge
+// calls the thing, and the vault keeps one value so a filter over the log does
+// not show the same kind twice under two names. Also keeps entries written
+// before the generalisation readable.
+var sourceAliases = map[string]string{
+	"pull-request": SourceMergeRequest,
+	"pr":           SourceMergeRequest,
+	"mr":           SourceMergeRequest,
+	"gitlab-mr":    SourceMergeRequest,
+	"github-pr":    SourceMergeRequest,
+	"jira":         SourceIssue,
+	"github-issue": SourceIssue,
+}
+
+// NormaliseSourceKind resolves an alias to the kind that is stored.
+func NormaliseSourceKind(kind string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	if canonical, ok := sourceAliases[kind]; ok {
+		return canonical
+	}
+	return kind
+}
 
 // Confidence levels.
 const (
@@ -189,11 +223,11 @@ func ParseTime(s string) (time.Time, error) {
 // at a known commit can be checked, a conversation cannot, and an inference is
 // not evidence at all.
 func DeriveConfidence(sourceKind string) string {
-	switch sourceKind {
-	case SourceFile, SourceGitLabMR:
+	switch NormaliseSourceKind(sourceKind) {
+	case SourceFile, SourceMergeRequest:
 		// Pinned to a commit or a diff, so it can be re-read exactly.
 		return ConfidenceHigh
-	case SourceJira, SourceDocument, SourceConfluence:
+	case SourceIssue, SourceDocument, SourceConfluence:
 		// A real document at a named place. Re-readable, but it may have moved
 		// under you — and a document is derivative: a plan or a run sheet is
 		// only as good as whatever it was written from, which is why it ranks
@@ -284,8 +318,8 @@ func ValidateFileRef(ref string) error {
 
 // ValidSourceKind reports whether kind is one agentctx knows how to weigh.
 func ValidSourceKind(kind string) bool {
-	switch kind {
-	case SourceFile, SourceGitLabMR, SourceJira, SourceDocument, SourceConfluence,
+	switch NormaliseSourceKind(kind) {
+	case SourceFile, SourceMergeRequest, SourceIssue, SourceDocument, SourceConfluence,
 		SourceWeb, SourceSlack, SourceConversation, SourceInferred:
 		return true
 	}
@@ -297,6 +331,6 @@ func ValidSourceKind(kind string) bool {
 // Ordered strongest first, because the list is read by a model choosing one and
 // the order is itself the advice.
 func SourceKinds() []string {
-	return []string{SourceFile, SourceGitLabMR, SourceJira, SourceDocument,
+	return []string{SourceFile, SourceMergeRequest, SourceIssue, SourceDocument,
 		SourceConfluence, SourceWeb, SourceSlack, SourceConversation, SourceInferred}
 }

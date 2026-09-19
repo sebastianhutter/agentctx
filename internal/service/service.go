@@ -498,6 +498,8 @@ func (s *Service) LogFinding(req LogFindingRequest) (*store.Entry, error) {
 		return nil, fmt.Errorf("source.kind %q is not one of %s",
 			req.Source.Kind, strings.Join(store.SourceKinds(), ", "))
 	}
+	// Whatever the caller's forge calls it, one value is stored.
+	req.Source.Kind = store.NormaliseSourceKind(req.Source.Kind)
 	if req.Source.Kind == store.SourceFile {
 		if err := store.ValidateFileRef(req.Source.Ref); err != nil {
 			return nil, err

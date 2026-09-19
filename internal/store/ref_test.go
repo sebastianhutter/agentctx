@@ -41,9 +41,9 @@ func TestDerivedConfidenceRanksSources(t *testing.T) {
 	for _, tc := range []struct{ kind, want string }{
 		// Pinned: re-readable exactly.
 		{SourceFile, ConfidenceHigh},
-		{SourceGitLabMR, ConfidenceHigh},
+		{SourceMergeRequest, ConfidenceHigh},
 		// A real document at a named place, but derivative or mutable.
-		{SourceJira, ConfidenceMedium},
+		{SourceIssue, ConfidenceMedium},
 		{SourceDocument, ConfidenceMedium},
 		{SourceConfluence, ConfidenceMedium},
 		// A URL rots and changes with no version — nearer hearsay than a document.
@@ -79,5 +79,51 @@ func TestEverySourceKindIsListedAndValid(t *testing.T) {
 			t.Errorf("SourceKinds is not ordered strongest first: %q outranks what precedes it", kind)
 		}
 		last = rank
+	}
+}
+
+// The forge is not a property of the claim: a GitLab merge request and a GitHub
+// pull request are the same object, and the ref says which. Both words are
+// accepted so an agent never has to hesitate over vocabulary, and one value is
+// stored so a filter over the log does not show the same kind twice.
+func TestSourceAliasesNormalise(t *testing.T) {
+	for _, tc := range []struct{ given, want string }{
+		{"pull-request", SourceMergeRequest},
+		{"PULL-REQUEST", SourceMergeRequest},
+		{"gitlab-mr", SourceMergeRequest},
+		{"github-pr", SourceMergeRequest},
+		{"pr", SourceMergeRequest},
+		{"mr", SourceMergeRequest},
+		{"jira", SourceIssue},
+		{"github-issue", SourceIssue},
+		{"merge-request", SourceMergeRequest},
+		{"file", SourceFile},
+		{"nonsense", "nonsense"},
+	} {
+		if got := NormaliseSourceKind(tc.given); got != tc.want {
+			t.Errorf("NormaliseSourceKind(%q) = %q, want %q", tc.given, got, tc.want)
+		}
+	}
+
+	// Entries written before the generalisation must stay readable and keep
+	// their weight.
+	for _, legacy := range []string{"gitlab-mr", "jira"} {
+		if !ValidSourceKind(legacy) {
+			t.Errorf("the legacy kind %q is no longer valid", legacy)
+		}
+	}
+	if DeriveConfidence("gitlab-mr") != ConfidenceHigh {
+		t.Error("a legacy gitlab-mr finding lost its confidence")
+	}
+	if DeriveConfidence("jira") != ConfidenceMedium {
+		t.Error("a legacy jira finding lost its confidence")
+	}
+
+	// Aliases are not offered: the list a model chooses from stays one word per
+	// thing.
+	for _, kind := range SourceKinds() {
+		if _, isAlias := sourceAliases[kind]; isAlias {
+			t.Errorf("SourceKinds offers %q, which is an alias", kind)
+		}
 	}
 }

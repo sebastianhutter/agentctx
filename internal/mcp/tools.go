@@ -181,8 +181,8 @@ var openTaskTool = mcp.NewTool("open_task",
 		mcp.Description("Project id. Only needed when the task id carries no known key prefix.")),
 	mcp.WithString("seed_title",
 		mcp.Description("The task's title. Required when the task note does not exist yet.")),
-	mcp.WithString("seed_source", mcp.Enum("jira", "gitlab", "manual"),
-		mcp.Description("Where the task came from. Defaults to jira when a source key is given, else manual.")),
+	mcp.WithString("seed_source", mcp.Enum("jira", "github", "gitlab", "manual"),
+		mcp.Description("Which tracker or forge the task came from. Defaults to jira when a source key is given, else manual.")),
 	mcp.WithString("seed_source_key",
 		mcp.Description("Tracker key, e.g. \"PROJ-142\".")),
 	mcp.WithString("seed_url",
@@ -297,7 +297,9 @@ var logFindingTool = mcp.NewTool("log_finding",
 		mcp.Enum(store.SourceKinds()...),
 		mcp.Description("Where it came from, strongest first.\n"+
 			"file — source code at a commit; the only kind that can be re-read exactly.\n"+
-			"gitlab-mr, jira — a diff or an issue.\n"+
+			"merge-request — a proposed change under review, whatever your forge calls it: a "+
+			"GitLab merge request or a GitHub pull request. Put the forge in the ref.\n"+
+			"issue — a tracker issue: Jira, GitHub, Linear.\n"+
 			"document — anything you can open again at a named place: a vault note, a PDF, a "+
 			"spec, a plan. Ranks below file on purpose, because a plan describing code is only "+
 			"as good as the code it was written from — cite the code when you have it.\n"+
