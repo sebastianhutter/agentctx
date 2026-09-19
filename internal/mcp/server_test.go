@@ -15,6 +15,7 @@ import (
 // a description a model may skim.
 func TestToolSchemasEnforceTheContract(t *testing.T) {
 	tools := map[string]mcp.Tool{
+		"find":         findTool,
 		"open_project": openProjectTool,
 		"open_task":    openTaskTool,
 		"log_decision": logDecisionTool,
@@ -38,6 +39,9 @@ func TestToolSchemasEnforceTheContract(t *testing.T) {
 		"log_finding":  {"finding", "source_kind"},
 		"close_task":   {"summary"},
 		"open_project": {"project_id"},
+		// find takes nothing: with no arguments it lists everything, which is
+		// what an agent holding no id needs first.
+		"find": {},
 	}
 	for name, fields := range required {
 		got := tools[name].InputSchema.Required
@@ -86,12 +90,22 @@ func TestScopeIsOfferedAndExplained(t *testing.T) {
 	}
 }
 
+// find is the only way to get an id without being told one, now that nothing
+// is inferred. If it takes a required argument, an agent that knows nothing
+// cannot start.
+func TestFindTakesNoRequiredArguments(t *testing.T) {
+	if got := findTool.InputSchema.Required; len(got) != 0 {
+		t.Errorf("find requires %v, but must be callable with nothing", got)
+	}
+}
+
 func TestServerInstructionsStateTheBoundary(t *testing.T) {
 	// The no-credentials rule is what makes seeding the agent's job. A host that
 	// does not learn this from the instructions will keep waiting for a fetch
 	// that never comes.
 	// Substrings must survive the line wrapping in the instructions text.
-	for _, want := range []string{"tracker credentials", "open_task before reading code", "scope=repo"} {
+	for _, want := range []string{"tracker credentials", "open_task before reading code", "scope=repo",
+		"call find first"} {
 		if !strings.Contains(instructions, want) {
 			t.Errorf("server instructions do not mention %q", want)
 		}

@@ -65,6 +65,51 @@ func callerIdentity(ctx context.Context) (name, sessionID string) {
 	}
 }
 
+// --- find ---
+
+var findTool = mcp.NewTool("find",
+	mcp.WithDescription(
+		"Which project or task is this work? Call it when you have not been given an id.\n\n"+
+			"Every other tool here needs one, and this is where it comes from — nothing is "+
+			"inferred from your working directory or branch, so an id you were not told has to "+
+			"be looked up.\n\n"+
+			"Returns places to look, not what is recorded there: ids, titles, and why each "+
+			"matched. Open one to get the actual knowledge. With no arguments it lists "+
+			"everything, which is the fastest way to see whether this work has a project at all.\n\n"+
+			"Matching is literal and case-insensitive, over ids, titles, repositories, tracker "+
+			"keys and the text of anything logged — so a query describing a problem can surface "+
+			"the task where it was solved. It is not a semantic search; for that, search the "+
+			"vault with whatever retrieval tool indexes it."),
+	mcp.WithString("query",
+		mcp.Description("Words that must all appear. Omit to list everything.")),
+	mcp.WithString("repo",
+		mcp.Description("Restrict to projects and tasks touching this repository, e.g. \"acme/infrastructure\".")),
+	mcp.WithBoolean("include_closed",
+		mcp.Description("Include closed tasks. Off by default — a closed task is rarely the one you want to log against.")),
+	mcp.WithNumber("limit",
+		mcp.Description("Maximum results (default 20).")),
+)
+
+func (h *handlers) find(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	svc, err := h.newService(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	req := service.FindRequest{
+		Query:         request.GetString("query", ""),
+		Repo:          request.GetString("repo", ""),
+		IncludeClosed: request.GetBool("include_closed", false),
+		Limit:         request.GetInt("limit", 0),
+	}
+
+	matches, err := svc.Find(req)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(service.RenderMatches(matches, req)), nil
+}
+
 // --- open_project ---
 
 var openProjectTool = mcp.NewTool("open_project",

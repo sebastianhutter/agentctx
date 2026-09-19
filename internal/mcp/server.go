@@ -30,6 +30,10 @@ work in the same repository or project starts with what the last one found out.
 
 HOW TO USE IT
 
+0. Every tool takes its task or project id explicitly — nothing is inferred from
+   a working directory or a branch name. If you were not told which project or
+   task this work is, call find first; with no arguments it lists everything.
+
 1. Call open_task before reading code. It returns what is already known about
    the task, its project and its repositories, plus the working agreement. On a
    task it has never seen, it needs a seed: look the issue up with whatever
@@ -50,6 +54,10 @@ HOW TO USE IT
 5. open_project answers "what do we know about this project", and accepts
    findings of its own — so a session that only reads can still write back what
    it confirmed.
+
+6. find returns places to look, never their contents: ids, titles and why each
+   matched. It searches logged text too, so a query describing a problem can
+   surface the task where it was solved — then open that task to read it.
 
 WHAT COMES BACK
 
@@ -72,6 +80,7 @@ func CreateServer(configPath, version string, transport service.Transport) *serv
 
 	h := &handlers{configPath: configPath, transport: transport}
 	s.AddTools(
+		server.ServerTool{Tool: findTool, Handler: h.find},
 		server.ServerTool{Tool: openProjectTool, Handler: h.openProject},
 		server.ServerTool{Tool: openTaskTool, Handler: h.openTask},
 		server.ServerTool{Tool: logDecisionTool, Handler: h.logDecision},

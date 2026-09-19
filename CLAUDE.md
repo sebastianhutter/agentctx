@@ -94,6 +94,9 @@ one.
 - **Nothing enters without provenance.** Every finding records where it came from
   and when. No wholesale copying from a tracker, a wiki or a search result.
 - **Projects are created deliberately, tasks lazily.** Never auto-create a project.
+- **`find` returns identifiers, never content.** It is how a caller gets an id to
+  pass to something else. The moment it starts returning findings it becomes a
+  worse copy of a retrieval tool that already indexes this vault.
 - **The task is an argument, never a guess.** `task_id` is required on every verb
   that writes. Do not reintroduce inference from the working directory, a state
   file or a branch name: a wrong guess attaches entries to the wrong task

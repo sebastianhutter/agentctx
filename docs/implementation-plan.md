@@ -244,6 +244,9 @@ auto-created** — refuse with "run `open_project` first".
 ### 4.5 Verbs
 
 ```
+find(query?, repo?, include_closed?, limit?)
+    -> project and task ids, with why each matched. Never their contents.
+
 open_project(project_id, name?, jira_projects?, gitlab_groups?, repos?, confluence_spaces?)
     -> project bundle; creates the note if missing (args required on create)
 
@@ -542,3 +545,38 @@ current task, without any of the guessing. The rest of the plan is unaffected:
 `AGENT_HOST` detection stays, `open_project` is unchanged, and no vault file
 changes except that task notes no longer carry `kepler_task_id`, which only ever
 existed to correlate with a binding.
+
+
+---
+
+## 11. find
+
+A sixth verb, added because §10 removed the last way to get an id without being
+told one. Every other tool requires a `task_id` or `project_id`; an agent that
+was handed neither could not list what exists, and `open_project`'s refusal —
+"run open_project first" — is useless advice to something that cannot see what
+is already there.
+
+**It returns places to look, not what is there.** Ids, titles, repositories, and
+one line saying why each matched. The caller then opens one, which is where the
+actual knowledge comes from, with provenance and staleness intact.
+
+That shape is what lets it search logged text without becoming a retrieval
+engine. A query describing a problem — `find provider upgrade` — matches the
+body of a finding and surfaces *the task that holds it*, costing a few hundred
+tokens rather than a page of content. Matching is literal, case-insensitive,
+and every term must appear.
+
+**It is not semantic, and deliberately so.** A vault indexed by a proper
+retrieval tool already answers "what is this like" far better than anything that
+could be built here without an embedding model and a network call, both of which
+D4 rules out. This answers "what is it called", which is the question that has to
+be answered before any other tool can be used.
+
+Two details worth keeping:
+
+- **Closed tasks are excluded** unless asked for. A closed task is rarely the one
+  to log against, and including them by default buries the open work.
+- **`opened` entries are not searched.** Their bodies are boilerplate this tool
+  wrote itself, containing the host name — searching them would make every task
+  match a query for `kepler`, confidently and uselessly.

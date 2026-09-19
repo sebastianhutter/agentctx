@@ -66,6 +66,7 @@ agentctx open-task proj-142 --title "Rework the network module" \
 
 | Verb | What it does |
 |---|---|
+| `find` | Which project or task is this work? Returns ids and why each matched — never their contents |
 | `open_project` | What do we know about this project? Creates the project note on first call |
 | `open_task` | What do we know about this task, its project and its repos? Creates the task note from a seed |
 | `log_decision` | A choice and why it was made. Rationale required |

@@ -457,3 +457,230 @@ func (s *Store) ListTasks(project string) ([]string, error) {
 	sort.Strings(ids)
 	return ids, nil
 }
+
+// Match is one hit from Search: a place to look, never the content found there.
+type Match struct {
+	Kind    string // "project" or "task"
+	ID      string
+	Title   string
+	Project string // empty for a project match
+	Repos   []string
+	Open    bool   // tasks only
+	Why     string // what matched
+	Snippet string // one line of context when an entry matched
+	Entries int    // how much has been recorded against it
+}
+
+// SearchFilter narrows a search. All fields are optional; with none set,
+// everything is returned, which is the "what is here at all" case.
+type SearchFilter struct {
+	// Terms must all appear somewhere in a candidate for it to match.
+	Terms []string
+
+	// Repo restricts to projects and tasks touching this repository.
+	Repo string
+
+	// IncludeClosed keeps tasks that have a closed entry.
+	IncludeClosed bool
+
+	// Limit caps the results. Zero means a sensible default.
+	Limit int
+}
+
+// Search finds projects and tasks worth opening.
+//
+// Matching is literal and case-insensitive: every term must appear somewhere in
+// the candidate's identity — its id, title, repos, tracker keys — or in the text
+// of something logged against it. That last part is what gives the search reach
+// without making this a retrieval engine: a query that matches a finding
+// surfaces the *task that holds it*, and the finding itself comes back with its
+// provenance when the caller opens it.
+//
+// Deliberately not semantic. A vault indexed by a proper retrieval tool is the
+// place for "what is this like"; this answers "what is it called", which is the
+// question an agent has to answer before it can call anything else.
+func (s *Store) Search(filter SearchFilter) ([]Match, error) {
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+
+	terms := make([]string, 0, len(filter.Terms))
+	for _, t := range filter.Terms {
+		if t = strings.ToLower(strings.TrimSpace(t)); t != "" {
+			terms = append(terms, t)
+		}
+	}
+	repo := strings.ToLower(strings.TrimSpace(filter.Repo))
+
+	projects, err := s.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []Match
+	for _, projectID := range projects {
+		note, body, err := s.ReadProject(projectID)
+		if err != nil {
+			slog.Warn("skipping unreadable project note", "project", projectID, "err", err)
+			continue
+		}
+
+		entries, err := s.Entries(projectID, EntryFilter{})
+		if err != nil {
+			return nil, err
+		}
+
+		// Index the project's entries by task once, rather than re-reading the
+		// log for every task in it.
+		byTask := map[string][]*Entry{}
+		closed := map[string]bool{}
+		var projectScoped []*Entry
+		for _, e := range entries {
+			if e.Task == "" {
+				projectScoped = append(projectScoped, e)
+				continue
+			}
+			byTask[e.Task] = append(byTask[e.Task], e)
+			if e.Kind == KindClosed {
+				closed[e.Task] = true
+			}
+		}
+
+		if repo == "" || containsFold(note.Repos, repo) {
+			haystack := strings.ToLower(strings.Join(append([]string{
+				note.ID, note.Name, body,
+			}, append(append(append([]string{}, note.Repos...), note.JiraProjects...), note.GitLabGroups...)...), " "))
+
+			why, snippet, ok := matchWhere(terms, haystack, projectScoped, "project")
+			if ok {
+				matches = append(matches, Match{
+					Kind: "project", ID: note.ID, Title: note.Name, Repos: note.Repos,
+					Why: why, Snippet: snippet, Entries: len(entries),
+				})
+			}
+		}
+
+		taskIDs, err := s.ListTasks(projectID)
+		if err != nil {
+			return nil, err
+		}
+		for _, taskID := range taskIDs {
+			task, taskBody, err := s.ReadTask(projectID, taskID)
+			if err != nil {
+				slog.Warn("skipping unreadable task note", "task", taskID, "err", err)
+				continue
+			}
+			if !filter.IncludeClosed && closed[taskID] {
+				continue
+			}
+			if repo != "" && !containsFold(task.Repos, repo) {
+				continue
+			}
+
+			haystack := strings.ToLower(strings.Join(append([]string{
+				task.ID, task.Title, task.SourceKey, taskBody,
+			}, task.Repos...), " "))
+
+			why, snippet, ok := matchWhere(terms, haystack, byTask[taskID], "task")
+			if ok {
+				matches = append(matches, Match{
+					Kind: "task", ID: task.ID, Title: task.Title, Project: task.Project,
+					Repos: task.Repos, Open: !closed[taskID],
+					Why: why, Snippet: snippet, Entries: len(byTask[taskID]),
+				})
+			}
+		}
+	}
+
+	// Projects first, then tasks with the most recorded against them: a task
+	// nobody has written anything about is the least useful thing to offer.
+	sort.SliceStable(matches, func(i, j int) bool {
+		if (matches[i].Kind == "project") != (matches[j].Kind == "project") {
+			return matches[i].Kind == "project"
+		}
+		if matches[i].Entries != matches[j].Entries {
+			return matches[i].Entries > matches[j].Entries
+		}
+		return matches[i].ID < matches[j].ID
+	})
+
+	if len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches, nil
+}
+
+// matchWhere reports whether every term appears in the candidate's own text or
+// in something logged against it, and says which.
+func matchWhere(terms []string, haystack string, entries []*Entry, kind string) (why, snippet string, ok bool) {
+	if len(terms) == 0 {
+		return "listed", "", true
+	}
+
+	missing := terms[:0:0]
+	for _, t := range terms {
+		if !strings.Contains(haystack, t) {
+			missing = append(missing, t)
+		}
+	}
+	if len(missing) == 0 {
+		return "matches this " + kind, "", true
+	}
+
+	// Terms not in the note itself may be in what was logged against it, which
+	// is the case worth having: "have we hit this before" is a question about
+	// the findings, not about the titles.
+	for _, e := range entries {
+		// Opened entries are boilerplate this tool wrote itself — "Task created
+		// from PROJ-142 on kepler-claude-code". Searching them would make every
+		// task match its own host name, which is a lot of confident noise.
+		if e.Kind == KindOpened {
+			continue
+		}
+		body := strings.ToLower(e.Body)
+		all := true
+		for _, t := range missing {
+			if !strings.Contains(body, t) {
+				all = false
+				break
+			}
+		}
+		if all {
+			return describeMatch(e.Kind), firstLineOf(e.Body), true
+		}
+	}
+	return "", "", false
+}
+
+// describeMatch says where a hit came from, in words that read as a sentence.
+func describeMatch(kind string) string {
+	switch kind {
+	case KindClosed:
+		return "matches the closing summary"
+	case KindNote:
+		return "matches a note"
+	default:
+		return "matches a logged " + kind
+	}
+}
+
+func firstLineOf(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 140 {
+		s = s[:140] + "…"
+	}
+	return s
+}
+
+func containsFold(list []string, want string) bool {
+	for _, s := range list {
+		if strings.EqualFold(strings.TrimSpace(s), want) {
+			return true
+		}
+	}
+	return false
+}

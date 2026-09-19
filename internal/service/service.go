@@ -150,6 +150,89 @@ func requireTaskID(explicit string) (string, error) {
 	return id, nil
 }
 
+// --- find ---
+
+// FindRequest asks which projects and tasks are worth opening.
+type FindRequest struct {
+	Query         string
+	Repo          string
+	IncludeClosed bool
+	Limit         int
+}
+
+// Find returns places to look: project and task ids, with why each matched.
+//
+// It exists because every other verb needs an id, and an agent that was not
+// handed one has no other way to get it — it cannot list what is there, and
+// guessing is what this design spent its effort removing. Find closes that
+// loop without reopening it: it returns identifiers a caller then passes
+// explicitly, not an inference made on their behalf.
+func (s *Service) Find(req FindRequest) ([]store.Match, error) {
+	return s.Store.Search(store.SearchFilter{
+		Terms:         strings.Fields(req.Query),
+		Repo:          req.Repo,
+		IncludeClosed: req.IncludeClosed,
+		Limit:         req.Limit,
+	})
+}
+
+// RenderMatches formats search results for an agent or a terminal.
+func RenderMatches(matches []store.Match, req FindRequest) string {
+	var out strings.Builder
+
+	if len(matches) == 0 {
+		out.WriteString("Nothing here matches.\n\n")
+		switch {
+		case req.Query != "" || req.Repo != "":
+			out.WriteString("Try fewer words, or call find with no arguments to see everything. " +
+				"Matching is literal, not semantic.\n")
+		default:
+			out.WriteString("The vault holds no projects yet. Create one with open_project " +
+				"— projects are made deliberately, never inferred.\n")
+		}
+		return out.String()
+	}
+
+	out.WriteString("# Places to look\n\n")
+	for _, m := range matches {
+		if m.Kind == "project" {
+			fmt.Fprintf(&out, "- **project `%s`**", m.ID)
+			if m.Title != "" {
+				fmt.Fprintf(&out, " — %s", m.Title)
+			}
+		} else {
+			fmt.Fprintf(&out, "- **task `%s`**", m.ID)
+			if m.Title != "" {
+				fmt.Fprintf(&out, " — %s", m.Title)
+			}
+			fmt.Fprintf(&out, " (project `%s`", m.Project)
+			if !m.Open {
+				out.WriteString(", closed")
+			}
+			out.WriteString(")")
+		}
+		out.WriteString("\n")
+
+		var meta []string
+		if len(m.Repos) > 0 {
+			meta = append(meta, strings.Join(m.Repos, ", "))
+		}
+		meta = append(meta, m.Why)
+		if m.Entries > 0 {
+			meta = append(meta, fmt.Sprintf("%d logged", m.Entries))
+		}
+		fmt.Fprintf(&out, "  <sub>%s</sub>\n", strings.Join(meta, " · "))
+
+		if m.Snippet != "" {
+			fmt.Fprintf(&out, "  > %s\n", m.Snippet)
+		}
+	}
+
+	out.WriteString("\nOpen one to get what is actually recorded: open_task for a task, " +
+		"open_project for a project.\n")
+	return out.String()
+}
+
 // --- open_project ---
 
 // OpenProjectRequest names a project and, on first call, describes it.
