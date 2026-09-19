@@ -32,6 +32,7 @@ bundle back. The system pays off from the second one onward.
 
 ```bash
 make build                                    # binary at bin/agentctx
+# or: make dist  — cross-compiles darwin/linux, arm64/amd64
 
 cat > ~/.agentctx/config.json <<'JSON'
 { "vault_path": "~/Obsidian/agentctx", "state_dir": "~/.agentctx" }

@@ -304,7 +304,6 @@ agentctx/
 │   ├── cmd_log.go                # log-decision, log-finding
 │   ├── cmd_close.go              # close-task
 │   └── cmd_doctor.go             # validate config, vault, identity, host detection
-├── scripts/check-names.sh        # Rule 0 enforcement, wired into make lint and CI
 ├── configs/config.example.json
 ├── docs/
 │   ├── implementation-plan.md    # this file
@@ -351,7 +350,7 @@ never inside the vault — it must not be synced.
 
 | Phase | Scope | Est. |
 |---|---|---|
-| **0 — scaffold** ✅ | `go.mod`, Makefile, cobra skeleton, `internal/config` + example JSON, `CLAUDE.md`,  `agentctx doctor` printing resolved config, vault path, host and identity, plus `make check-names` (deny-list grep over tracked files) wired into `make lint` | ~½ day |
+| **0 — scaffold** ✅ | `go.mod`, Makefile, cobra skeleton, `internal/config` + example JSON, `CLAUDE.md`,  `agentctx doctor` printing resolved config, vault path, host and identity | ~½ day |
 | **1 — vault and store** ✅ | frontmatter parse/render, atomic create-and-rename writes, project note create, task note create, entry append, scope queries. Tests run against a temp-dir vault, so no real vault is touched | ~1 day |
 | **2 — identity and bundles** ✅ | resolution chain (§4.4), Kepler env detection, `bindings.json`, host detection, bundle assembly, date-based staleness, working-agreement text | ~1 day |
 | **3 — MCP and CLI** ✅ | five verbs as thin wrappers over the core, server instructions, `close_task` refusal, the same verbs as CLI subcommands | ~1 day |
@@ -402,8 +401,8 @@ Resolved after the first draft:
   uses placeholders throughout (`proj`, `PROJ-142`, `acme/infrastructure`,
   `example.atlassian.net`). The real vault path lives only in
   `~/.agentctx/config.json`; `configs/config.example.json` carries a neutral one.
-  Phase 0 adds a `make check-names` grep of a deny-list over tracked files, wired
-  into `make lint`, so the rule is enforced by the build rather than by memory.
+  Nothing enforces it automatically — see §8 for why the attempt was dropped —
+  so it is a writing rule plus a read-through before the repository is published.
 
 
 ---
@@ -430,12 +429,16 @@ and a quoted value is a string to Obsidian Bases — unsortable and unfilterable
 a date, in the views the plan calls for. `vault.Render` unquotes ISO dates on the
 way out. Trivial now, a migration across every file later.
 
-**`check-names.sh` uses structural patterns, not a list of names.** The obvious
-implementation is a deny-list of the real names — which is itself the leak, once
-committed. So the committed check matches the *shape* of a leak (issue keys
-outside a closed placeholder set, tracker hostnames, mail addresses, home
-directories), and the literal names live in `~/.agentctx/deny-names.txt`, outside
-the repository, where the check picks them up if present.
+**The automated name check was built and then dropped.** A committed script
+cannot hold the list it needs to check — a deny-list of real customer names is
+itself the leak — so the version that existed matched the *shape* of a leak
+(issue keys outside a closed placeholder set, tracker hostnames, mail addresses,
+home directories) and read the literal names from a file outside the repository.
+It worked, and it was still the wrong thing to carry: a false-positive machine
+guarding a rule that applies to prose a human writes, in a one-person repository,
+where the real safeguard is reading the diff. Rule 0 stays as instructions in
+`CLAUDE.md` with a read-through before the repository goes public. Revisit only
+if a name actually slips.
 
 ### Still to do
 

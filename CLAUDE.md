@@ -46,11 +46,20 @@ Use these placeholders consistently:
 | tracker site | `example.atlassian.net`, `gitlab.example.com` |
 | org / GitLab group | `acme` |
 | repositories | `acme/infrastructure`, `acme/platform` |
+| a module or file path | `modules/network/main.tf` |
 | a person | `someone`, or omit |
 
-`scripts/check-names.sh` enforces the key prefixes against a closed list
-(`PROJ`, `OTHER`, `NOPE`, `ACME`). Adding a prefix to it is a decision to record
-here, not a reflex to silence a failing check.
+Nothing enforces this automatically. It is a rule you and any agent working here
+follow while writing, which means the moment to apply it is **before** the text
+exists, not in a review pass afterwards.
+
+**Before making this repository public**, read every tracked file once with this
+rule in mind, and grep the working tree and `git log -p` for the names you know
+are yours — your employer, your customers, their products, their issue-key
+prefixes, their tracker hostnames, your own name and mail addresses. History
+counts: a name removed in a later commit is still in the repository. If one turns
+up, rewriting history (or starting a fresh repository from the current tree) is
+the only real fix.
 
 Aggregate measurements are welcome and are what makes documentation useful — "a
 project accumulated 40 findings over two weeks" is fine. The identities behind

@@ -4,7 +4,7 @@ BUILD_DIR := bin
 VERSION ?= dev
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: all build test test-v lint check-names clean tidy install
+.PHONY: all build test test-v lint dist clean tidy install
 
 all: build
 
@@ -17,14 +17,21 @@ test:
 test-v:
 	go test -race -count=1 -v ./...
 
-# check-names runs before the linter on purpose: a leaked customer name is a
-# worse defect than anything golangci-lint reports, and it is permanent once
-# committed. See Rule 0 in CLAUDE.md.
-lint: check-names
+lint:
 	golangci-lint run ./...
 
-check-names:
-	./scripts/check-names.sh
+# dist cross-compiles every supported target. Pure Go with no CGO, so this needs
+# nothing but the toolchain — one runner builds all of them.
+PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
+
+dist:
+	@mkdir -p $(BUILD_DIR)
+	@for platform in $(PLATFORMS); do \
+		os=$${platform%/*}; arch=$${platform#*/}; \
+		echo "building $(BINARY)-$$os-$$arch"; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 \
+			go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-$$os-$$arch ./cmd/agentctx || exit 1; \
+	done
 
 clean:
 	rm -rf $(BUILD_DIR)

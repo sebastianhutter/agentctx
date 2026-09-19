@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. 0.2.0)"
+        required: true
+        default: "0.0.0-test"
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.27"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - run: make test
+
+  # One job builds every target: agentctx is pure Go with no CGO, so cross
+  # compilation needs nothing but the toolchain. No per-OS runner, no matrix.
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Determine version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "VERSION=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build all targets
+        run: make dist VERSION=${{ steps.version.outputs.VERSION }}
+
+      - name: Check the version was stamped
+        run: |
+          # The build is useless for bug reports if --version says "dev", and a
+          # broken ldflags path fails silently otherwise.
+          got=$(./bin/agentctx-linux-amd64 --version)
+          echo "$got"
+          case "$got" in
+            *"${{ steps.version.outputs.VERSION }}"*) ;;
+            *) echo "version not stamped into the binary"; exit 1 ;;
+          esac
+
+      - name: Checksums
+        run: cd bin && sha256sum agentctx-* > SHA256SUMS && cat SHA256SUMS
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: |
+            bin/agentctx-darwin-arm64
+            bin/agentctx-darwin-amd64
+            bin/agentctx-linux-amd64
+            bin/agentctx-linux-arm64
+            bin/SHA256SUMS
+
+  release:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            artifacts/agentctx-darwin-arm64 \
+            artifacts/agentctx-darwin-amd64 \
+            artifacts/agentctx-linux-amd64 \
+            artifacts/agentctx-linux-arm64 \
+            artifacts/SHA256SUMS
+
+      - name: List artifacts (manual run)
+        if: github.event_name == 'workflow_dispatch'
+        run: ls -lh artifacts/

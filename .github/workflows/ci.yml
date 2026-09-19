@@ -21,10 +21,13 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # Runs first and on its own: a leaked customer name is permanent once
-      # merged, so it should fail before anything else spends time. See Rule 0.
-      - name: Check for leaked names
-        run: make check-names
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
 
+      - run: go vet ./...
       - run: make build
       - run: make test
