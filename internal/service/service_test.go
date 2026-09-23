@@ -446,7 +446,8 @@ func TestLogDependency(t *testing.T) {
 			t.Fatalf("LogDependency: %v", err)
 		}
 		// The wikilink is what gives the vault its own graph view for free.
-		if !strings.Contains(entry.Body, "[[proj-139]]") {
+		// Path-qualified, because a bare id can name a tracker export too.
+		if !strings.Contains(entry.Body, "[[proj/tasks/proj-139|proj-139]]") {
 			t.Errorf("body has no wikilink: %q", entry.Body)
 		}
 		if !strings.Contains(entry.Body, "split first") {
