@@ -130,6 +130,12 @@ type Entry struct {
 	// stays readable afterwards.
 	Resolved bool `yaml:"resolved,omitempty"`
 
+	// Parent and RepoNote are links rendered from Task, Project and Repo when
+	// the entry is written. See PropParent. Never read back: the ids are what
+	// agentctx works from.
+	Parent   string `yaml:"parent,omitempty"`
+	RepoNote string `yaml:"repo_note,omitempty"`
+
 	// Body is the entry itself and is never part of the frontmatter.
 	Body string `yaml:"-"`
 
@@ -164,6 +170,9 @@ type TaskNote struct {
 	// newer than this are returned separately, so consolidation is compaction
 	// and never correctness.
 	ConsolidatedThrough string `yaml:"consolidated_through,omitempty"`
+
+	// Parent links the task to its project note. See PropParent.
+	Parent string `yaml:"parent,omitempty"`
 }
 
 // ProjectNote is the frontmatter of <project>/<project>.md.

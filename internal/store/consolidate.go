@@ -22,6 +22,9 @@ type RepoNote struct {
 	Project             string `yaml:"project"`
 	Created             string `yaml:"created"`
 	ConsolidatedThrough string `yaml:"consolidated_through,omitempty"`
+
+	// Parent links the note to its project note. See PropParent.
+	Parent string `yaml:"parent,omitempty"`
 }
 
 // RepoNotePath returns <vault>/<project>/notes/<repo>.md.
@@ -99,6 +102,8 @@ func (s *Store) ConsolidateTask(project, taskID, body, through, expectThrough st
 	}
 
 	note.ConsolidatedThrough = through
+	// A note created before links were written gains one on its next fold.
+	note.Parent = s.ProjectLink(project)
 	data, err := vault.Render(note, body)
 	if err != nil {
 		return err
@@ -158,6 +163,7 @@ func (s *Store) ConsolidateRepo(projectID, repo, body, through, expectThrough st
 	}
 
 	note.ConsolidatedThrough = through
+	note.Parent = s.ProjectLink(projectID)
 	data, err := vault.Render(note, body)
 	if err != nil {
 		return err

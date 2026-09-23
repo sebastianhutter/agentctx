@@ -627,9 +627,9 @@ func (s *Service) LogDependency(req LogDependencyRequest) (*store.Entry, error) 
 
 	var body strings.Builder
 	if req.Resolved {
-		fmt.Fprintf(&body, "No longer waiting for %s.\n\n", wikilinks(deps))
+		fmt.Fprintf(&body, "No longer waiting for %s.\n\n", s.Store.TaskLinks(project, deps))
 	} else {
-		fmt.Fprintf(&body, "Waits for %s.\n\n", wikilinks(deps))
+		fmt.Fprintf(&body, "Waits for %s.\n\n", s.Store.TaskLinks(project, deps))
 	}
 	body.WriteString(strings.TrimSpace(req.Reason) + "\n")
 
@@ -643,16 +643,6 @@ func (s *Service) LogDependency(req LogDependencyRequest) (*store.Entry, error) 
 		return nil, err
 	}
 	return entry, nil
-}
-
-// wikilinks renders task ids as Obsidian links, so the vault's own graph view
-// shows the ordering without anything else being built.
-func wikilinks(ids []string) string {
-	out := make([]string, 0, len(ids))
-	for _, id := range ids {
-		out = append(out, "[["+id+"]]")
-	}
-	return strings.Join(out, ", ")
 }
 
 // --- consolidate ---

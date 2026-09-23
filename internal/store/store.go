@@ -236,6 +236,7 @@ func (s *Store) CreateTask(note *TaskNote) error {
 	if title == "" {
 		title = note.ID
 	}
+	note.Parent = s.ProjectLink(note.Project)
 
 	data, err := vault.Render(note, fmt.Sprintf(emptyTaskBody, title))
 	if err != nil {
@@ -311,6 +312,7 @@ func (s *Store) Append(entry *Entry) (string, error) {
 	if subject == "" {
 		subject = entry.Project
 	}
+	entry.Parent, entry.RepoNote = s.entryLinks(entry)
 
 	data, err := vault.Render(entry, entry.Body)
 	if err != nil {

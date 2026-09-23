@@ -44,6 +44,8 @@ source:                        # required on findings
     ref: modules/network/main.tf@abc1234
     retrieved: 2026-09-19
 confidence: high               # derived from source.kind
+parent: '[[proj/tasks/proj-142|proj-142]]'   # see Links; the project note when there is no task
+repo_note: '[[proj/notes/acme-infrastructure|acme/infrastructure]]'  # when that note exists
 ---
 
 for_each over a provider-versioned map breaks on upgrade; the keys are recomputed
@@ -125,7 +127,7 @@ depends_on:
 resolved:                      # true lifts these edges instead of adding them
 ---
 
-Waits for [[proj-210]].
+Waits for [[proj/tasks/proj-210|proj-210]].
 
 The VPC cannot be added until the module exposes per-environment inputs
 ```
@@ -153,6 +155,7 @@ repos:
     - acme/infrastructure
 created: 2026-09-19
 consolidated_through:          # log entries older than this are folded into the body
+parent: '[[proj/proj|proj]]'
 ---
 
 ## Current understanding
@@ -194,6 +197,36 @@ consolidated_through:
 `jira_projects` and `gitlab_groups` are how `PROJ-142` resolves to this folder.
 They cannot be guessed, which is why creating a project requires arguments and
 why a project is never created implicitly.
+
+## Links
+
+The ids in `task`, `project` and `repo` are what agentctx reads. Beside them,
+every file carries the same relation as a link, so Obsidian's graph and anything
+indexing the vault can follow it:
+
+| File | `parent` | `repo_note` |
+|---|---|---|
+| log entry with a task | its task note | its repo note, if the entry has a repo and the note exists |
+| log entry without a task | the project note | as above |
+| task note, repo note | the project note | — |
+
+One parent per file, not a link to every ancestor: the project note is linked by
+its tasks and its project-scoped entries, not by every entry of every task.
+
+Links are **path-qualified**: `[[proj/tasks/proj-142|proj-142]]`, never
+`[[proj-142]]`. Task ids are often tracker keys, and a vault indexed beside a
+tracker export holds two files named `proj-142.md`. A bare link resolves to
+whichever one a resolver prefers; a path cannot be mistaken.
+
+A link is only written to a file that exists. A dangling link in Obsidian is one
+click from creating an empty file there, and an empty file where a repo note
+belongs is one consolidation cannot read.
+
+`agentctx relink` backfills files written before links existed, and adds a
+`repo_note` link to entries whose repo note appeared later. It is the one command
+that edits a log entry, and it only adds links derived from ids already in the
+file. It edits frontmatter as text, so properties added in Obsidian survive.
+`--dry-run` lists what it would change.
 
 ## consolidated_through
 
