@@ -19,6 +19,7 @@ const (
 	KindDependency = "dependency"
 	KindClosed     = "closed"
 	KindNote       = "note"
+	KindAmend      = "amend"
 )
 
 // Finding scopes. The scope decides what survives the task, which is the whole
@@ -136,6 +137,15 @@ type Entry struct {
 	// and Entries stops returning it unless asked to.
 	Supersedes []string `yaml:"supersedes,omitempty"`
 
+	// AddRepos, RemoveRepos, AddKeys and RemoveKeys are an amend entry's
+	// changes to its project's repos and tracker keys. The project note keeps
+	// what was set at creation; ReadProject folds these on top. See
+	// Store.ReadProject.
+	AddRepos    []string `yaml:"add_repos,omitempty"`
+	RemoveRepos []string `yaml:"remove_repos,omitempty"`
+	AddKeys     []string `yaml:"add_tracker_keys,omitempty"`
+	RemoveKeys  []string `yaml:"remove_tracker_keys,omitempty"`
+
 	// Parent and RepoNote are links rendered from Task, Project and Repo when
 	// the entry is written. See PropParent. Never read back: the ids are what
 	// agentctx works from.
@@ -176,7 +186,7 @@ func EntryID(path string) string {
 // resolved for changing its mind.
 func Supersedable(kind string) bool {
 	switch kind {
-	case KindFinding, KindDecision, KindNote:
+	case KindFinding, KindDecision, KindNote, KindAmend:
 		return true
 	}
 	return false

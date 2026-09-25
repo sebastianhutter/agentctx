@@ -117,7 +117,7 @@ func (s *Store) ConsolidateTask(project, taskID, body, through, expectThrough st
 
 // ConsolidateProject replaces a project note's body.
 func (s *Store) ConsolidateProject(projectID, body, through, expectThrough string, checked bool) error {
-	note, _, err := s.ReadProject(projectID)
+	note, _, err := s.readProjectNote(projectID)
 	if err != nil {
 		return err
 	}

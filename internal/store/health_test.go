@@ -114,7 +114,7 @@ func TestCheckUnmappedKeys(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("key-unmapped = %+v, want 4", got)
 	}
-	if i := got["example/PROJ"]; i.Severity != SeverityWarn || !strings.Contains(i.Fix, "add PROJ") {
+	if i := got["example/PROJ"]; i.Severity != SeverityWarn || !strings.Contains(i.Fix, "add_tracker_keys=[PROJ]") {
 		t.Errorf("an unclaimed single-project key should say to claim it: %+v", i)
 	}
 	if i := got["beta/OTHER"]; i.Severity != SeverityInfo || !strings.Contains(i.Message, "resolve to alpha") {

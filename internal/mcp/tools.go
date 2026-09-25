@@ -550,3 +550,48 @@ func (h *handlers) closeTask(ctx context.Context, request mcp.CallToolRequest) (
 	}
 	return mcp.NewToolResultText(strings.TrimSpace(fmt.Sprintf("Closed %s.\n%s", entry.Task, entry.Path))), nil
 }
+
+// --- amend_project ---
+
+var amendProjectTool = mcp.NewTool("amend_project",
+	mcp.WithDescription(
+		"Add or remove a project's repositories and tracker keys, when the work shows the project is "+
+			"missing one. open_task lists such gaps under \"Project gaps\" with the exact call.\n\n"+
+			"A repository the project does not list is one whose findings the next task never sees. A tracker "+
+			"key no project claims is one open_task cannot resolve without being told the project.\n\n"+
+			"Each call is recorded in the log with its reason, so it can be undone by another. Claiming a key "+
+			"is refused when another project claims it, when tasks in another project use it (a shared "+
+			"tracker: keep passing project to open_task instead), or when no task in this project uses it yet."),
+	mcp.WithString("project_id", mcp.Required(), mcp.Description("Project to amend.")),
+	mcp.WithArray("add_repos", mcp.WithStringItems(),
+		mcp.Description("Repositories that belong to the project, by their qualified name, e.g. \"acme/platform\".")),
+	mcp.WithArray("remove_repos", mcp.WithStringItems(), mcp.Description("Repositories that do not belong after all.")),
+	mcp.WithArray("add_tracker_keys", mcp.WithStringItems(),
+		mcp.Description("Tracker key prefixes the project's tasks come from, e.g. [\"PROJ\"] for PROJ-142.")),
+	mcp.WithArray("remove_tracker_keys", mcp.WithStringItems(), mcp.Description("Tracker keys to release.")),
+	mcp.WithString("reason", mcp.Required(),
+		mcp.Description("Why these belong, or do not: what showed it.")),
+)
+
+func (h *handlers) amendProject(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	svc, err := h.newService(ctx)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	projectID, err := request.RequireString("project_id")
+	if err != nil {
+		return mcp.NewToolResultError("project_id is required"), nil
+	}
+	entry, err := svc.AmendProject(service.AmendProjectRequest{
+		ProjectID:   projectID,
+		AddRepos:    request.GetStringSlice("add_repos", nil),
+		RemoveRepos: request.GetStringSlice("remove_repos", nil),
+		AddKeys:     request.GetStringSlice("add_tracker_keys", nil),
+		RemoveKeys:  request.GetStringSlice("remove_tracker_keys", nil),
+		Reason:      request.GetString("reason", ""),
+	})
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf("Amended project %s.\n%s\n%s", entry.Project, entry.Body, entry.Path)), nil
+}

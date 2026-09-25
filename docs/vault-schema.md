@@ -226,6 +226,44 @@ consolidated_through:
 They cannot be guessed, which is why creating a project requires arguments and
 why a project is never created implicitly.
 
+### Amending a project
+
+What belongs to a project is found out as the work goes, so `repos` and
+`jira_projects` change after creation — by an **amend entry** in the log, not an
+edit to the note:
+
+```yaml
+---
+kind: amend
+project: proj
+scope: project
+ts: 2026-09-25T16:40:00
+host: kepler-claude-code
+add_repos: [acme/tools]
+add_tracker_keys: [PROJ]
+# remove_repos, remove_tracker_keys likewise
+---
+
+Tasks PROJ-1 and PROJ-2 were opened here with project passed explicitly.
+
+**Adds repos:** acme/tools
+**Claims tracker keys:** PROJ
+```
+
+Everything reads the project through `ReadProject`, which folds the amendments
+on top of the note: oldest first, additions before removals within one entry.
+The note's frontmatter keeps what was set at creation or by hand in Obsidian,
+and consolidation never writes the folded lists back — stored, they would
+survive a later removal. A wrong amendment is undone by another, or superseded.
+
+A repo costs little to get wrong, a tracker key a lot: it decides where every
+future task with that key is filed. `amend_project` therefore refuses a key
+that another project claims, that tasks in another project use (a shared
+tracker, where passing `project` to `open_task` is the answer), that equals
+another project's id, or that no task in this project uses yet — the last one
+catches a typo before it takes effect. `open_task` lists what the task shows
+its project is missing under **Project gaps**, with the call that closes it.
+
 ## Links
 
 The ids in `task`, `project` and `repo` are what agentctx reads. Beside them,

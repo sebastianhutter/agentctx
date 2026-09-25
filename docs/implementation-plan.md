@@ -49,7 +49,8 @@ Desktop skill for consolidating · `Stop` and `PreCompact` hooks · a derived
 SQLite index · any external interface, if D4 ever proves too austere.
 
 (Explicit supersede, once on this list as `replaces:`, has since been built as
-`supersedes` — see `docs/vault-schema.md`. What prompted it was a finding filed
+`supersedes`, and project amendments as `amend` entries folded on read — see
+`docs/vault-schema.md`. What prompted it was a finding filed
 under a bare repo name: the one kind of mistake the checks can see and nothing
 could repair. Automatic near-duplicate detection stays out.)
 
