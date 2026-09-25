@@ -1,0 +1,11 @@
+{{define "issuelist"}}
+<ul class="issues">
+{{range .}}
+  <li class="issue sev-{{.Severity}}">
+    <span class="pill sev-{{.Severity}}">{{.Severity}}</span>
+    <span>{{.Message}}</span>
+    <div class="fix">→ {{.Fix}}</div>
+  </li>
+{{end}}
+</ul>
+{{end}}

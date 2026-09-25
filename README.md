@@ -52,7 +52,7 @@ cat > ~/.agentctx/config.json <<'JSON'
 { "vault_path": "~/Obsidian/agentctx" }
 JSON
 
-agentctx doctor                               # config, host, task resolution, registration
+agentctx doctor                               # config, host, registration, vault checks
 
 agentctx open-project proj --name "Example project" \
     --jira-project PROJ --repo acme/infrastructure
@@ -114,15 +114,31 @@ than from detection. Task ids are required either way.
 
 ## Web interface
 
-`http://localhost:31125/` — projects, tasks, repository notes, and a log view
-filterable by project, task, kind, scope and host. Opened from the menu bar, or
-run on its own with `agentctx web`.
+`http://localhost:31125/` — projects, tasks, repository notes, a graph, the
+vault checks, and a log view filterable by project, task, kind, scope, host and
+repo. Opened from the menu bar, or run on its own with `agentctx web`.
+
+- **Graph** (`/graph`) draws projects, tasks, repositories and, optionally, log
+  entries as one picture. A repository is one node however many projects work on
+  it, so the repos that tie projects together are visible — Obsidian's graph has
+  a note per project for the same repo and cannot show that. Task colour is
+  ready/blocked/closed, arrows are dependencies, and a dashed line is a repo a
+  project writes about without listing it. With one project selected, tasks are
+  laid out in columns by dependency depth, so the order the work has to happen
+  in reads left to right. Click opens, double-click focuses a neighbourhood.
+- **Checks** (`/checks`, also printed by `agentctx doctor`) lists what makes
+  recorded knowledge harder to reach: repos in use but missing from the project
+  note, tracker keys no project claims (or two claim), a repo logged under a
+  short and a qualified name, entries naming a task that does not exist,
+  dependencies that can never resolve, tasks opened with nothing logged, and
+  notes with a long unconsolidated backlog. Advice, never enforcement — each is
+  a decision for a person.
 
 Read-mostly, deliberately. Obsidian edits notes better than a browser form, and
-everything an agent writes goes through the verbs — so the two things this does
-that neither does well are the cross-cutting log view (which is where "did this
-host write anything" gets answered) and creating a project, the one write action
-worth a form.
+everything an agent writes goes through the verbs — so what this does is what
+neither does well: the cross-cutting log view (which is where "did this host
+write anything" gets answered), the graph and checks across projects, and
+creating a project, the one write action worth a form.
 
 Bound to loopback and unauthenticated. It also checks the `Host` header, because
 a loopback bind stops another machine connecting but not a web page resolving a

@@ -77,9 +77,19 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		rows = append(rows, row)
 	}
 
+	warn := 0
+	if issues, err := st.Check(); err == nil {
+		for _, i := range issues {
+			if i.Severity == store.SeverityWarn {
+				warn++
+			}
+		}
+	}
+
 	s.render(w, "index.html", map[string]any{
 		"Page":     "projects",
 		"Projects": rows,
+		"Warn":     warn,
 		"Vault":    cfg.ExpandedVaultPath(),
 		"Version":  s.version,
 	})
@@ -190,6 +200,7 @@ func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 		"Repos":   repos,
 		"Recent":  decorate(lastN(entries, 15), cfg.Stale.MaxAgeDays),
 		"Entries": len(entries),
+		"Issues":  projectIssues(st, id),
 		"Version": s.version,
 	})
 }
@@ -465,5 +476,73 @@ func facet(counts map[string]int) []facetValue {
 		}
 		return out[i].Value < out[j].Value
 	})
+	return out
+}
+
+// handleChecks lists what store.Check finds, grouped by project.
+//
+// The checks are advice, never enforcement: each one is something a person
+// decides, such as whether a repo belongs on the project note. This page is
+// where the decision gets made.
+func (s *Server) handleChecks(w http.ResponseWriter, r *http.Request) {
+	st, _, err := s.newStore()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+	issues, err := st.Check()
+	if err != nil {
+		s.fail(w, err, http.StatusInternalServerError)
+		return
+	}
+
+	type group struct {
+		Project string
+		Issues  []store.Issue
+	}
+	var groups []group
+	index := map[string]int{}
+	warn := 0
+	for _, i := range issues {
+		if i.Severity == store.SeverityWarn {
+			warn++
+		}
+		at, ok := index[i.Project]
+		if !ok {
+			at = len(groups)
+			index[i.Project] = at
+			groups = append(groups, group{Project: i.Project})
+		}
+		groups[at].Issues = append(groups[at].Issues, i)
+	}
+	// The vault-wide group first, then projects alphabetically.
+	sort.SliceStable(groups, func(i, j int) bool {
+		if (groups[i].Project == "") != (groups[j].Project == "") {
+			return groups[i].Project == ""
+		}
+		return groups[i].Project < groups[j].Project
+	})
+
+	s.render(w, "checks.html", map[string]any{
+		"Page":    "checks",
+		"Groups":  groups,
+		"Total":   len(issues),
+		"Warn":    warn,
+		"Version": s.version,
+	})
+}
+
+// projectIssues returns the checks that concern one project.
+func projectIssues(st *store.Store, project string) []store.Issue {
+	issues, err := st.Check()
+	if err != nil {
+		return nil
+	}
+	var out []store.Issue
+	for _, i := range issues {
+		if i.Project == project {
+			out = append(out, i)
+		}
+	}
 	return out
 }

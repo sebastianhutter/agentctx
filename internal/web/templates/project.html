@@ -6,7 +6,15 @@
   <code>{{.Project.ID}}</code>
   {{if .Project.JiraProjects}} · keys {{join .Project.JiraProjects ", "}}{{end}}
   · <a href="/log?project={{.Project.ID}}">{{plural .Entries "entry" "entries"}}</a>
+  · <a href="/graph?project={{.Project.ID}}">graph</a>
 </p>
+
+{{if .Issues}}
+<details class="checks">
+  <summary>{{plural (len .Issues) "check"}} for this project</summary>
+  {{template "issuelist" .Issues}}
+</details>
+{{end}}
 
 {{if .HasBody}}
   <section class="note">{{.Body}}</section>

@@ -1,9 +1,10 @@
 // Package web serves a small local interface for reading the vault.
 //
 // Read-mostly on purpose. Obsidian edits notes better than a browser form ever
-// will, and everything an agent writes goes through the verbs — so the two
-// things this offers that neither does well are a log view with cross-cutting
-// filters, and creating a project without going through a chat.
+// will, and everything an agent writes goes through the verbs — so what this
+// offers is what neither does well: a log view with cross-cutting filters, a
+// graph of how projects, tasks and repositories connect, the vault checks, and
+// creating a project without going through a chat.
 package web
 
 import (
@@ -27,10 +28,10 @@ import (
 var assets embed.FS
 
 // pages are the page templates, each parsed into its own set.
-var pages = []string{"index.html", "project.html", "task.html", "repo.html", "log.html", "new.html"}
+var pages = []string{"index.html", "project.html", "task.html", "repo.html", "log.html", "new.html", "graph.html", "checks.html"}
 
 // shared are parsed into every page's set.
-var shared = []string{"templates/layout.html", "templates/entrylist.html"}
+var shared = []string{"templates/layout.html", "templates/entrylist.html", "templates/issuelist.html"}
 
 // Server serves the vault over HTTP on the loopback interface.
 type Server struct {
@@ -82,6 +83,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /project/{project}/repo/{repo...}", s.handleRepoNote)
 	mux.HandleFunc("GET /t/{task}", s.handleTaskRedirect)
 	mux.HandleFunc("GET /log", s.handleLog)
+	mux.HandleFunc("GET /graph", s.handleGraph)
+	mux.HandleFunc("GET /graph.json", s.handleGraphJSON)
+	mux.HandleFunc("GET /checks", s.handleChecks)
 	mux.HandleFunc("GET /new", s.handleNewProjectForm)
 	mux.HandleFunc("POST /new", s.handleNewProject)
 

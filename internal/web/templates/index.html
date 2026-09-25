@@ -2,7 +2,8 @@
 {{define "title"}}Projects — agentctx{{end}}
 {{define "content"}}
 <h1>Projects</h1>
-<p class="muted">Vault: <code>{{.Vault}}</code></p>
+<p class="muted">Vault: <code>{{.Vault}}</code> · <a href="/graph">see how they connect</a></p>
+{{if .Warn}}<p class="nudge"><a href="/checks">{{plural .Warn "warning"}} in the vault checks</a> — knowledge that is recorded but will not be found where an agent looks for it.</p>{{end}}
 
 {{if not .Projects}}
   <div class="empty">
