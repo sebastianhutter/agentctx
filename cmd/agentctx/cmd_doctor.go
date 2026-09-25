@@ -16,7 +16,7 @@ import (
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Show resolved configuration, host detection and task resolution",
+	Short: "Show resolved configuration, host detection and vault checks",
 	Long: `Print what agentctx has worked out about its own situation: where the vault
 is, which host it thinks it is running on, how to register it, and what the
 vault already holds.
@@ -86,6 +86,12 @@ every verb that writes.`,
 			}
 			fmt.Printf("  %-16s %d tasks, %d log entries\n", id, len(tasks), len(entries))
 		}
+
+		issues, err := s.Check()
+		if err != nil {
+			return err
+		}
+		printIssues(issues)
 		return nil
 	},
 }
@@ -120,6 +126,27 @@ func printRegistration() {
 	if onPath, err := exec.LookPath("agentctx"); err != nil || onPath != exe {
 		fmt.Println("\n  For the command line, put it on your PATH:")
 		fmt.Printf("    mkdir -p ~/.local/bin && ln -sf %q ~/.local/bin/agentctx\n", exe)
+	}
+}
+
+// printIssues lists what the vault checks found, warnings first.
+func printIssues(issues []store.Issue) {
+	fmt.Println("\nChecks")
+	if len(issues) == 0 {
+		fmt.Println("  ✓ nothing to report")
+		return
+	}
+	for _, i := range issues {
+		mark := "✗"
+		if i.Severity == store.SeverityInfo {
+			mark = "·"
+		}
+		where := i.Project
+		if where == "" {
+			where = "vault"
+		}
+		fmt.Printf("  %s %-16s %s\n", mark, where, i.Message)
+		fmt.Printf("    %-16s → %s\n", "", i.Fix)
 	}
 }
 
