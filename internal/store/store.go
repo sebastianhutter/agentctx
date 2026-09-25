@@ -98,8 +98,11 @@ func (s *Store) ListProjects() ([]string, error) {
 	return ids, nil
 }
 
-// ReadProject reads a project note.
-func (s *Store) ReadProject(id string) (*ProjectNote, string, error) {
+// readProjectNote reads a project note as it is on disk, without the
+// amendments in the log. Only consolidation wants this: it rewrites the file,
+// and writing the folded lists back would turn a derived view into stored
+// state that a later amendment could no longer undo.
+func (s *Store) readProjectNote(id string) (*ProjectNote, string, error) {
 	if err := ValidateID("project", id); err != nil {
 		return nil, "", err
 	}

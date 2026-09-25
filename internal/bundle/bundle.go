@@ -57,6 +57,10 @@ type TaskBundle struct {
 	// Blocks are the tasks waiting for this one.
 	Blocks []string
 
+	// Gaps are things this task shows its project is missing, each with the
+	// call that closes it. See service.ProjectGaps.
+	Gaps []Gap
+
 	// Unconsolidated are the task's own entries not yet folded into the body.
 	Unconsolidated []Marked
 
@@ -80,6 +84,12 @@ type ProjectBundle struct {
 	// BlockedTasks are open but waiting. Separated rather than filtered out:
 	// "nothing to do" and "nothing you can do yet" call for different responses.
 	BlockedTasks []BlockedTask
+}
+
+// Gap is something missing from a project, with the call that closes it.
+type Gap struct {
+	Message string
+	Fix     string
 }
 
 // BlockedTask is an open task waiting for others.
@@ -286,6 +296,15 @@ func (b *TaskBundle) Render() string {
 			strings.Join(b.OpenBlockers, ", "))
 		out.WriteString("Those are not closed yet. Open one to see where it stands, " +
 			"or log_dependency with resolved to lift the edge if it no longer applies.\n")
+	}
+
+	// Asked for here, where the agent that knows whether the repo or key
+	// belongs is reading, rather than on a page nobody opens.
+	if len(b.Gaps) > 0 {
+		out.WriteString("\n## Project gaps\n\n")
+		for _, g := range b.Gaps {
+			fmt.Fprintf(&out, "- %s\n  → %s\n", g.Message, g.Fix)
+		}
 	}
 
 	out.WriteString("\n## Task\n\n")

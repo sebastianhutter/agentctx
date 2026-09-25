@@ -152,7 +152,7 @@ func checkProject(p *projectData) []Issue {
 		}
 		add(SeverityWarn, IssueRepoUnlisted, r,
 			fmt.Sprintf("%s is used by %s but is not in the project's repos", r, strings.Join(users, " and ")),
-			fmt.Sprintf("add %s to repos in %s/%s.md, or re-log the findings under the repo's canonical name", r, p.id, p.id))
+			fmt.Sprintf("amend_project %s add_repos=[%s] if it belongs, or supersede the findings under the repo's canonical name", p.id, r))
 	}
 
 	// Entries that point at nothing, or at another project.
@@ -356,7 +356,7 @@ func checkUnmappedKeys(projects []*projectData) []Issue {
 					Severity: SeverityWarn, Code: IssueKeyUnmapped, Project: project, Subject: key,
 					Message: fmt.Sprintf("%s here %s %s keys, but no project claims %s, so open_task on a new %s key cannot find this one",
 						plural(n, "task"), agree(n, "uses", "use"), key, key, key),
-					Fix: fmt.Sprintf("add %s to jira_projects in %s/%s.md", key, project, project),
+					Fix: fmt.Sprintf("amend_project %s add_tracker_keys=[%s]", project, key),
 				})
 			}
 		}
@@ -411,7 +411,7 @@ func checkRepoNames(projects []*projectData) []Issue {
 				Severity: SeverityWarn, Code: IssueRepoNearDuplicate, Project: project, Subject: bare,
 				Message: fmt.Sprintf("repo %q looks like a short form of %s; findings under the two names are kept apart",
 					bare, strings.Join(qualified, " or ")),
-				Fix: fmt.Sprintf("log future findings under %s", qualified[0]),
+				Fix: fmt.Sprintf("supersede those findings with ones filed under %s", qualified[0]),
 			})
 		}
 	}

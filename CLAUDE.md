@@ -100,6 +100,9 @@ one.
 - **Nothing enters without provenance.** Every finding records where it came from
   and when. No wholesale copying from a tracker, a wiki or a search result.
 - **Projects are created deliberately, tasks lazily.** Never auto-create a project.
+  What belongs to one changes through `amend` entries folded by `ReadProject`,
+  never by rewriting the note's frontmatter — consolidation reads the raw note
+  (`readProjectNote`) so the folded lists are never stored.
 - **`find` returns identifiers, never content.** It is how a caller gets an id to
   pass to something else. The moment it starts returning findings it becomes a
   worse copy of a retrieval tool that already indexes this vault.

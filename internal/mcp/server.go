@@ -95,6 +95,7 @@ func CreateServer(configPath, version string, transport service.Transport) *serv
 		server.ServerTool{Tool: logDecisionTool, Handler: h.logDecision},
 		server.ServerTool{Tool: logFindingTool, Handler: h.logFinding},
 		server.ServerTool{Tool: logDependencyTool, Handler: h.logDependency},
+		server.ServerTool{Tool: amendProjectTool, Handler: h.amendProject},
 		server.ServerTool{Tool: consolidateTool, Handler: h.consolidate},
 		server.ServerTool{Tool: closeTaskTool, Handler: h.closeTask},
 	)

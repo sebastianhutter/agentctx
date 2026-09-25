@@ -380,6 +380,9 @@ func (s *Service) OpenTask(req OpenTaskRequest) (*bundle.TaskBundle, error) {
 		return nil, err
 	}
 	b.Created = created
+	for _, g := range s.ProjectGaps(project, taskID) {
+		b.Gaps = append(b.Gaps, bundle.Gap{Message: g.Message, Fix: g.Fix})
+	}
 	return b, nil
 }
 

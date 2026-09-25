@@ -73,6 +73,7 @@ agentctx open-task proj-142 --title "Rework the network module" \
 | `log_finding` | Something looked up and confirmed. Source required, scope chosen deliberately |
 | | Both log verbs take `supersedes`: the ids of earlier entries this one replaces. The old file stays; agents stop seeing it |
 | `log_dependency` | This task waits for those. Refuses loops and unknown ids |
+| `amend_project` | Adds or removes a project's repos and tracker keys, as a log entry with a reason. Refuses a key another project claims or shares; `open_task` suggests the call when it spots a gap |
 | `consolidate` | Folds logged entries into a note body — the only verb that rewrites anything |
 | `close_task` | Closes with a summary — and refuses if nothing was logged |
 
