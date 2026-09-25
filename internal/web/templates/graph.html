@@ -1,0 +1,36 @@
+{{template "layout" .}}
+{{define "title"}}Graph — agentctx{{end}}
+{{define "wide"}}wide{{end}}
+{{define "content"}}
+<div class="graph-bar">
+  <h1>Graph</h1>
+  <label>Project
+    <select id="g-project">
+      <option value="">all projects</option>
+      {{range .Projects}}<option value="{{.}}" {{if eq . $.Project}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label><input type="checkbox" id="g-entries"> log entries</label>
+  <label><input type="checkbox" id="g-closed" checked> closed tasks</label>
+  <label><input type="search" id="g-search" placeholder="highlight…"></label>
+  <span class="muted" id="g-count"></span>
+</div>
+
+<div class="graph-wrap">
+  <svg id="graph" role="img" aria-label="Projects, tasks, repositories and log entries"></svg>
+  <div id="g-tip" class="graph-tip" hidden></div>
+  <div class="graph-legend">
+    <div><span class="lg lg-project"></span>project</div>
+    <div><span class="lg lg-repo"></span>repository <span class="muted">· ring: shared by several projects</span></div>
+    <div><span class="lg lg-task-ready"></span>task ready
+      <span class="lg lg-task-blocked"></span>blocked
+      <span class="lg lg-task-closed"></span>closed</div>
+    <div><span class="lg lg-entry-repo"></span>repo
+      <span class="lg lg-entry-project"></span>project
+      <span class="lg lg-entry-task"></span>task-scoped entry</div>
+    <div><span class="ll ll-waits"></span>waits for <span class="ll ll-uses"></span>repo not on the project note</div>
+    <div class="muted">Drag to move · scroll to zoom · click to open · double-click to focus</div>
+  </div>
+</div>
+<script src="/static/graph.js"></script>
+{{end}}

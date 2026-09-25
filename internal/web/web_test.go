@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -85,6 +86,8 @@ func TestEachPageRendersItself(t *testing.T) {
 		{"/project/proj/repo/acme/infrastructure", "acme/infrastructure"},
 		{"/log", "Log"},
 		{"/new", "New project"},
+		{"/graph", "g-project"},
+		{"/checks", "Checks"},
 	} {
 		rec := get(t, s, tc.path)
 		if rec.Code != http.StatusOK {
@@ -266,5 +269,140 @@ func TestMissingVaultIsReportedNotPanicked(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "vault_path") {
 		t.Errorf("the error does not say what is wrong:\n%s", rec.Body.String())
+	}
+}
+
+func graphJSON(t *testing.T, s *Server, path string) graphData {
+	t.Helper()
+	rec := get(t, s, path)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s = %d: %s", path, rec.Code, rec.Body.String())
+	}
+	var data graphData
+	if err := json.Unmarshal(rec.Body.Bytes(), &data); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return data
+}
+
+func hasEdge(data graphData, source, target, rel string) bool {
+	for _, e := range data.Edges {
+		if e.Source == source && e.Target == target && e.Rel == rel {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeByID(data graphData, id string) *graphNode {
+	for i := range data.Nodes {
+		if data.Nodes[i].ID == id {
+			return &data.Nodes[i]
+		}
+	}
+	return nil
+}
+
+func TestGraphJSON(t *testing.T) {
+	s, st := newTestServer(t)
+	// A second project on the same repository: the repo must be one node
+	// joining both, which is the reason the graph exists.
+	if err := st.CreateProject(&store.ProjectNote{ID: "other", Name: "Other", Repos: []string{"acme/infrastructure"}}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	// And a repo written about without being listed.
+	if _, err := st.Append(&store.Entry{Kind: store.KindFinding, Task: "proj-142", Project: "proj",
+		Scope: store.ScopeRepo, Repo: "acme/platform", Body: "Unlisted",
+		Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	data := graphJSON(t, s, "/graph.json")
+
+	for _, want := range []struct{ source, target, rel string }{
+		{"task:proj/proj-142", "project:proj", relIn},
+		{"task:proj/proj-143", "project:proj", relIn},
+		{"project:proj", "repo:acme/infrastructure", relOwns},
+		{"project:other", "repo:acme/infrastructure", relOwns},
+		{"project:proj", "repo:acme/platform", relUses},
+		{"task:proj/proj-142", "repo:acme/infrastructure", relTouch},
+		{"task:proj/proj-143", "task:proj/proj-142", relWaits},
+	} {
+		if !hasEdge(data, want.source, want.target, want.rel) {
+			t.Errorf("missing edge %s -%s-> %s", want.source, want.rel, want.target)
+		}
+	}
+
+	repo := nodeByID(data, "repo:acme/infrastructure")
+	if repo == nil || repo.State != "shared-unconsolidated" || repo.Detail != "other, proj" {
+		t.Errorf("shared repo node = %+v", repo)
+	}
+	if repo != nil && repo.Weight != 1 {
+		t.Errorf("repo weight = %d, want its one repo-scoped finding", repo.Weight)
+	}
+	if n := nodeByID(data, "task:proj/proj-143"); n == nil || n.State != "blocked" {
+		t.Errorf("proj-143 waits for an open task and should be blocked: %+v", n)
+	}
+
+	// Decisions and findings become entry nodes; the dependency entry does
+	// not, since it is already the waits edge.
+	var entries []graphNode
+	for _, n := range data.Nodes {
+		if n.Kind == nodeEntry {
+			entries = append(entries, n)
+		}
+	}
+	if len(entries) != 3 {
+		t.Errorf("entry nodes = %d, want 3 (decision, repo finding, unlisted finding)", len(entries))
+	}
+	for _, e := range entries {
+		if e.Label == store.KindDependency {
+			t.Errorf("a dependency entry should be an edge, not a node: %+v", e)
+		}
+	}
+}
+
+func TestGraphJSONOneProject(t *testing.T) {
+	s, st := newTestServer(t)
+	if err := st.CreateProject(&store.ProjectNote{ID: "other", Name: "Other"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	data := graphJSON(t, s, "/graph.json?project=proj")
+	if nodeByID(data, "project:other") != nil {
+		t.Error("a project filter still returned another project")
+	}
+	if nodeByID(data, "project:proj") == nil {
+		t.Error("the filtered project is missing")
+	}
+
+	rec := get(t, s, "/graph.json?project="+url.QueryEscape("../../etc"))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("a traversal id got %d, want 400", rec.Code)
+	}
+}
+
+func TestChecksPageAndProjectIssues(t *testing.T) {
+	s, st := newTestServer(t)
+	// A repo written about but missing from the project note.
+	if _, err := st.Append(&store.Entry{Kind: store.KindFinding, Task: "proj-142", Project: "proj",
+		Scope: store.ScopeRepo, Repo: "acme/platform", Body: "Unlisted",
+		Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	rec := get(t, s, "/checks")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /checks = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "acme/platform is used by") {
+		t.Errorf("checks page does not report the unlisted repo")
+	}
+	if !strings.Contains(get(t, s, "/").Body.String(), "in the vault checks") {
+		t.Error("index does not point at the warnings")
+	}
+
+	rec = get(t, s, "/project/proj")
+	if !strings.Contains(rec.Body.String(), "for this project") {
+		t.Error("project page does not show its checks")
 	}
 }

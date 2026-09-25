@@ -1,0 +1,21 @@
+{{template "layout" .}}
+{{define "title"}}Checks — agentctx{{end}}
+{{define "content"}}
+<h1>Checks</h1>
+<p class="muted">Nothing here is wrong enough to refuse at write time. Each item is knowledge that is
+recorded but will not be found where an agent looks for it, or will be split across two names.
+Warnings already cost a lookup; info is housekeeping. The same list prints in <code>agentctx doctor</code>.</p>
+
+{{if not .Groups}}
+  <div class="empty"><p>Nothing to report.</p></div>
+{{else}}
+  <p class="counts"><span class="warn">{{plural .Warn "warning"}}</span> <span class="muted">{{plural .Total "check"}} in all</span></p>
+{{end}}
+
+{{range .Groups}}
+<section class="card">
+  <h2>{{if .Project}}<a href="/project/{{.Project}}">{{.Project}}</a>{{else}}Across the vault{{end}}</h2>
+  {{template "issuelist" .Issues}}
+</section>
+{{end}}
+{{end}}
