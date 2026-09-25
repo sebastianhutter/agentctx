@@ -406,3 +406,72 @@ func TestChecksPageAndProjectIssues(t *testing.T) {
 		t.Error("project page does not show its checks")
 	}
 }
+
+func TestGraphNodeDetail(t *testing.T) {
+	s, st := newTestServer(t)
+	entries, err := st.Entries("proj", store.EntryFilter{Task: "proj-142"})
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("fixture entries: %v", err)
+	}
+	file := filepath.Base(entries[0].Path)
+
+	for _, tc := range []struct{ query, want string }{
+		{"kind=project&project=proj", "Example project"},
+		{"kind=task&project=proj&task=proj-142", "Rework the network module"},
+		// proj-142 is what proj-143 waits for, and the panel says so.
+		{"kind=task&project=proj&task=proj-142", `data-node="task:proj/proj-143"`},
+		{"kind=task&project=proj&task=proj-143", "blocked"},
+		{"kind=repo&repo=" + url.QueryEscape("acme/infrastructure"), "The module breaks on upgrade"},
+		{"kind=entry&project=proj&file=" + url.QueryEscape(file), "Chose B"},
+	} {
+		rec := get(t, s, "/graph/node?"+tc.query)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s = %d: %s", tc.query, rec.Code, rec.Body.String())
+			continue
+		}
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s does not contain %q", tc.query, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		query string
+		code  int
+	}{
+		{"kind=entry&project=proj&file=" + url.QueryEscape("../../etc/passwd"), http.StatusBadRequest},
+		{"kind=task&project=" + url.QueryEscape("../etc") + "&task=x", http.StatusBadRequest},
+		{"kind=repo&repo=" + url.QueryEscape("acme/nothing"), http.StatusNotFound},
+		{"kind=task&project=proj&task=proj-999", http.StatusNotFound},
+		{"kind=bogus", http.StatusNotFound},
+	} {
+		if rec := get(t, s, "/graph/node?"+tc.query); rec.Code != tc.code {
+			t.Errorf("%s = %d, want %d", tc.query, rec.Code, tc.code)
+		}
+	}
+}
+
+func TestGraphJSONWarningsAndWeights(t *testing.T) {
+	s, st := newTestServer(t)
+	for i := 0; i < 2; i++ {
+		if _, err := st.Append(&store.Entry{Kind: store.KindFinding, Task: "proj-142", Project: "proj",
+			Scope: store.ScopeRepo, Repo: "acme/platform", Body: "Unlisted",
+			Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}}); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	data := graphJSON(t, s, "/graph.json")
+
+	if n := nodeByID(data, "repo:acme/platform"); n == nil || n.Warn == 0 {
+		t.Errorf("an unlisted repo should carry its warning: %+v", n)
+	}
+	for _, e := range data.Edges {
+		if e.Source == "task:proj/proj-142" && e.Target == "repo:acme/platform" && e.Rel == relTouch && e.Weight != 2 {
+			t.Errorf("touches weight = %d, want 2 (two entries)", e.Weight)
+		}
+	}
+	for _, n := range data.Nodes {
+		if n.Kind == nodeEntry && (!strings.HasPrefix(n.ID, "entry:proj/") || n.File == "") {
+			t.Errorf("entry node must name its project and file: %+v", n)
+		}
+	}
+}

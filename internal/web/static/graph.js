@@ -1,87 +1,144 @@
-// The graph page: projects, tasks, repositories and log entries as one picture.
+// The graph page: projects, tasks, repositories and log entries as one picture,
+// with a side panel that shows everything known about whatever is clicked.
 //
-// No library and no build step, like the rest of this interface. A few hundred
-// nodes is what one person's vault holds, which a plain O(n²) force layout
-// settles in well under a second, so there is nothing a framework would buy.
+// Drawn with Cytoscape.js (vendored under static/vendor, see LICENSES.txt).
+// Two layouts: projects as clusters (fcose, which understands compound nodes)
+// for the whole vault, and a left-to-right dependency flow (dagre) for one
+// project, where the order the work has to happen in is the thing to see.
 (function () {
   "use strict";
 
-  const SVGNS = "http://www.w3.org/2000/svg";
-  const svg = document.getElementById("graph");
-  const tip = document.getElementById("g-tip");
-  const count = document.getElementById("g-count");
+  const $ = (id) => document.getElementById(id);
   const ui = {
-    project: document.getElementById("g-project"),
-    entries: document.getElementById("g-entries"),
-    closed: document.getElementById("g-closed"),
-    search: document.getElementById("g-search"),
+    project: $("g-project"), layout: $("g-layout"), entries: $("g-entries"),
+    closed: $("g-closed"), search: $("g-search"), fit: $("g-fit"), count: $("g-count"),
+    tip: $("g-tip"), panel: $("g-panel"), body: $("g-panel-body"), close: $("g-close"),
   };
 
-  // Rest lengths per relation: an entry sits close to what it was logged on,
-  // a repository further out, where tasks from several projects can reach it.
-  const LENGTH = { logged: 26, about: 90, in: 90, owns: 170, uses: 170, touches: 110, waits: 70, waited: 70 };
-  const STRENGTH = { logged: 0.9, about: 0.03, in: 0.35, owns: 0.1, uses: 0.06, touches: 0.03, waits: 0.25, waited: 0.15 };
+  // Colours come from the stylesheet, so the graph follows light and dark mode
+  // with the rest of the page.
+  const css = getComputedStyle(document.documentElement);
+  const c = (name) => css.getPropertyValue(name).trim();
+  const colour = {
+    project: c("--g-project"), repo: c("--g-repo"), ready: c("--g-ready"), blocked: c("--g-blocked"),
+    closed: c("--g-closed"), eRepo: c("--g-e-repo"), eProject: c("--g-e-project"), eTask: c("--g-e-task"),
+    edge: c("--g-edge"), ink: c("--ink"), muted: c("--muted"), bg: c("--bg"), warn: c("--warn"),
+  };
 
   let data = { nodes: [], edges: [] };
-  let nodes = [], edges = [], byId = new Map(), neighbours = new Map();
-  const positions = new Map(); // survives a reload, so toggling a filter does not reshuffle
-  let alpha = 1, running = false;
-  let view = { x: 0, y: 0, k: 1 };
-  let focus = null; // a node id whose neighbourhood alone is shown
-  let hover = null;
-  let fitting = true; // follow the layout with the camera until the user takes over
+  let focus = null; // node id whose neighbourhood alone is shown
+  let selected = null; // node id whose details are in the panel
+  const positions = new Map(); // kept across filter changes, so the picture does not reshuffle
 
-  const viewport = el("g", { class: "viewport" });
-  const edgeLayer = el("g", { class: "edges" });
-  const nodeLayer = el("g", { class: "nodes" });
-  viewport.append(edgeLayer, nodeLayer);
-  const defs = el("defs");
-  defs.innerHTML =
-    '<marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">' +
-    '<path d="M 0 0 L 10 5 L 0 10 z" class="arrow"/></marker>';
-  svg.append(defs, viewport);
+  const cy = cytoscape({
+    container: $("graph"),
+    minZoom: 0.08,
+    maxZoom: 3,
+    wheelSensitivity: 0.25,
+    boxSelectionEnabled: false,
+    style: [
+      { selector: "node", style: {
+        label: "data(label)", "font-size": 10, color: colour.muted,
+        "text-valign": "bottom", "text-margin-y": 3,
+        "text-outline-color": colour.bg, "text-outline-width": 2,
+        "border-width": 1.5, "border-color": colour.bg,
+        "min-zoomed-font-size": 7,
+      } },
+      // A project with children is a cluster: a box around its tasks.
+      { selector: "node[kind='project']:parent", style: {
+        shape: "round-rectangle", "background-color": colour.project, "background-opacity": 0.05,
+        "border-color": colour.project, "border-width": 2, "border-opacity": 0.6,
+        "text-valign": "top", "text-halign": "center", "text-margin-y": -4,
+        "font-size": 14, "font-weight": 650, color: colour.ink, padding: 18,
+      } },
+      { selector: "node[kind='project']:childless", style: {
+        shape: "ellipse", "background-color": colour.project,
+        width: "mapData(weight, 0, 150, 34, 70)", height: "mapData(weight, 0, 150, 34, 70)",
+        "font-size": 13, "font-weight": 650, color: colour.ink,
+      } },
+      { selector: "node[kind='project'][state='unconsolidated']", style: { "border-style": "dashed" } },
+      { selector: "node[kind='task']", style: {
+        shape: "ellipse", width: "mapData(weight, 0, 40, 16, 42)", height: "mapData(weight, 0, 40, 16, 42)",
+      } },
+      { selector: "node[kind='task'][state='ready']", style: { "background-color": colour.ready } },
+      { selector: "node[kind='task'][state='blocked']", style: { "background-color": colour.blocked } },
+      { selector: "node[kind='task'][state='closed']", style: { "background-color": colour.closed } },
+      { selector: "node[kind='repo']", style: {
+        shape: "round-rectangle", "background-color": colour.repo, color: colour.ink,
+        width: "mapData(weight, 0, 30, 20, 48)", height: "mapData(weight, 0, 30, 20, 48)",
+      } },
+      { selector: "node[kind='repo'][state^='shared']", style: { "border-color": colour.ink, "border-width": 3 } },
+      { selector: "node[kind='repo'][state$='unconsolidated']", style: { "background-opacity": 0.5 } },
+      { selector: "node[kind='entry']", style: {
+        width: 9, height: 9, label: "", "border-width": 0.8, "background-color": colour.eTask,
+      } },
+      { selector: "node[kind='entry'][state='repo']", style: { "background-color": colour.eRepo } },
+      { selector: "node[kind='entry'][state='project']", style: { "background-color": colour.eProject } },
+      { selector: "node[kind='entry'][label='decision']", style: { shape: "diamond", width: 11, height: 11 } },
+      { selector: "node[kind='entry'][label='note']", style: { shape: "round-rectangle" } },
+      // Warnings from the checks page, drawn as a halo so they show at any zoom.
+      { selector: "node[warn > 0]", style: {
+        "underlay-color": colour.warn, "underlay-opacity": 0.35, "underlay-padding": 6, "underlay-shape": "ellipse",
+      } },
+      { selector: "edge", style: {
+        width: 1, "line-color": colour.edge, "curve-style": "bezier", opacity: 0.8,
+      } },
+      { selector: "edge[rel='touches']", style: { width: "mapData(weight, 1, 12, 1, 5)" } },
+      { selector: "edge[rel='logged']", style: { width: 0.6 } },
+      { selector: "edge[rel='about']", style: { width: 0.6, "line-style": "dotted" } },
+      { selector: "edge[rel='owns']", style: { width: 1.8 } },
+      { selector: "edge[rel='uses']", style: { "line-color": colour.warn, "line-style": "dashed", width: 1.6 } },
+      // A waits edge points at the task being waited for. In the flow layout
+      // the element runs blocker → waiter so dagre ranks blockers first, and
+      // the arrow is drawn at the source end instead.
+      { selector: "edge[rel='waits'], edge[rel='waited']", style: {
+        "line-color": colour.blocked, width: 2, "target-arrow-shape": "triangle",
+        "target-arrow-color": colour.blocked, "arrow-scale": 1.1,
+      } },
+      { selector: "edge[rel='waited']", style: {
+        "line-color": colour.closed, "target-arrow-color": colour.closed, "line-style": "dashed",
+      } },
+      { selector: "edge.flipped[rel='waits'], edge.flipped[rel='waited']", style: {
+        "target-arrow-shape": "none", "source-arrow-shape": "triangle", "source-arrow-color": colour.blocked,
+      } },
+      { selector: "edge.flipped[rel='waited']", style: { "source-arrow-color": colour.closed } },
+      { selector: ".faded", style: { opacity: 0.1, "text-opacity": 0 } },
+      { selector: "node.hl", style: { "text-opacity": 1, color: colour.ink } },
+      { selector: "edge.hl", style: { opacity: 1, width: 2.5 } },
+      { selector: "node:selected", style: { "border-color": colour.ink, "border-width": 3 } },
+    ],
+  });
 
-  function el(name, attrs) {
-    const e = document.createElementNS(SVGNS, name);
-    for (const k in attrs || {}) e.setAttribute(k, attrs[k]);
-    return e;
+  // --- data and elements ----------------------------------------------------
+
+  function layoutMode() {
+    if (ui.layout.value !== "auto") return ui.layout.value;
+    return ui.project.value ? "flow" : "clusters";
   }
-
-  function radius(n) {
-    switch (n.kind) {
-      case "project": return 13 + Math.sqrt(n.weight) * 0.9;
-      case "repo": return 8 + Math.sqrt(n.weight) * 1.3;
-      case "task": return 5 + Math.sqrt(n.weight) * 1.1;
-      default: return 3.5;
-    }
-  }
-
-  // --- data -----------------------------------------------------------------
 
   async function load() {
+    syncURL();
     const p = ui.project.value;
-    const url = new URL(location.href);
-    if (p) url.searchParams.set("project", p); else url.searchParams.delete("project");
-    if (ui.entries.checked) url.searchParams.set("entries", "1"); else url.searchParams.delete("entries");
-    history.replaceState(null, "", url);
-    focus = null;
-
     const res = await fetch("/graph.json" + (p ? "?project=" + encodeURIComponent(p) : ""));
     if (!res.ok) {
-      count.textContent = "could not load the graph: " + (await res.text());
+      ui.count.textContent = "could not load the graph: " + (await res.text());
       return;
     }
     data = await res.json();
     data.nodes = data.nodes || [];
     data.edges = data.edges || [];
-    fitting = true;
-    rebuild();
+    positions.clear();
+    rebuild(true);
   }
 
-  // rebuild applies the filters and draws the DOM for what is left.
-  function rebuild() {
+  // rebuild turns graph.json into Cytoscape elements under the current
+  // filters and layout mode, then lays them out.
+  function rebuild(fresh) {
+    const clusters = layoutMode() === "clusters";
     const showEntries = ui.entries.checked;
     const showClosed = ui.closed.checked;
+
+    cy.nodes().forEach((n) => positions.set(n.id(), { ...n.position() }));
 
     let keep = new Set();
     for (const n of data.nodes) {
@@ -89,10 +146,9 @@
       if (n.kind === "task" && n.state === "closed" && !showClosed) continue;
       keep.add(n.id);
     }
-    // An entry hangs off its task: hiding the task hides the entry.
-    for (const e of data.edges) {
-      if (e.rel === "logged" && !keep.has(e.target)) keep.delete(e.source);
-    }
+    // An entry hangs off what it was logged on: hiding that hides the entry.
+    for (const e of data.edges) if (e.rel === "logged" && !keep.has(e.target)) keep.delete(e.source);
+
     if (focus && keep.has(focus)) {
       const near = new Set([focus]);
       for (const e of data.edges) {
@@ -100,397 +156,253 @@
         if (e.source === focus) near.add(e.target);
         if (e.target === focus) near.add(e.source);
       }
+      // Keep the boxes the focused nodes live in, so they stay readable.
+      if (clusters) for (const n of data.nodes) if (near.has(n.id) && n.project) near.add("project:" + n.project);
       keep = near;
+    } else {
+      focus = null;
     }
 
-    nodes = data.nodes.filter((n) => keep.has(n.id));
-    edges = data.edges.filter((e) => keep.has(e.source) && keep.has(e.target));
-    byId = new Map(nodes.map((n) => [n.id, n]));
-    neighbours = new Map(nodes.map((n) => [n.id, new Set()]));
-    for (const e of edges) {
-      neighbours.get(e.source).add(e.target);
-      neighbours.get(e.target).add(e.source);
-    }
-
-    layer();
-    place();
-    draw();
-    const tasks = nodes.filter((n) => n.kind === "task").length;
-    const repos = nodes.filter((n) => n.kind === "repo").length;
-    const projects = nodes.filter((n) => n.kind === "project").length;
-    const entries = nodes.filter((n) => n.kind === "entry").length;
-    count.textContent =
-      `${projects} projects · ${tasks} tasks · ${repos} repos` + (entries ? ` · ${entries} entries` : "") +
-      (focus ? " · focused (double-click the background to clear)" : "");
-    kick(1);
-  }
-
-  // layer assigns each node a column when one project is shown: blockers left
-  // of what waits for them, the project before its first tasks, repositories
-  // after the last. Pure forces tie a dependency chain into a knot; a column
-  // per depth reads as the order the work has to happen in. With several
-  // projects the columns would fight each other, so it is off there.
-  const COLUMN = 130;
-  function layer() {
-    for (const n of nodes) n.col = null;
-    if (!ui.project.value || focus) return;
-
-    const blockers = new Map();
-    for (const e of edges) {
-      if (e.rel !== "waits" && e.rel !== "waited") continue;
-      if (!blockers.has(e.source)) blockers.set(e.source, []);
-      blockers.get(e.source).push(e.target);
-    }
-    const depth = new Map();
-    const visit = (id, seen) => {
-      if (depth.has(id)) return depth.get(id);
-      if (seen.has(id)) return 0; // a cycle; the checks refuse these, but do not hang on one
-      seen.add(id);
-      let d = 0;
-      for (const b of blockers.get(id) || []) d = Math.max(d, visit(b, seen) + 1);
-      depth.set(id, d);
-      return d;
-    };
-    let max = 0;
-    for (const n of nodes) if (n.kind === "task") max = Math.max(max, visit(n.id, new Set()));
-    const mid = max / 2;
-    for (const n of nodes) {
-      if (n.kind === "task") n.col = (depth.get(n.id) - mid) * COLUMN;
-      else if (n.kind === "project") n.col = (-mid - 1.2) * COLUMN;
-      else if (n.kind === "repo") n.col = (mid + 1.4) * COLUMN;
-    }
-  }
-
-  // place gives every node a starting point: where it was before, else near
-  // whatever it hangs off, else on a ring of projects.
-  function place() {
-    const projects = nodes.filter((n) => n.kind === "project");
-    const ring = Math.max(80, projects.length * 35);
-    projects.forEach((n, i) => {
-      if (positions.has(n.id)) return;
-      const a = (2 * Math.PI * i) / Math.max(1, projects.length);
-      positions.set(n.id, { x: Math.cos(a) * ring, y: Math.sin(a) * ring, vx: 0, vy: 0 });
-    });
-    const order = ["task", "repo", "entry"];
-    for (const kind of order) {
-      for (const n of nodes) {
-        if (n.kind !== kind || positions.has(n.id)) continue;
-        let anchor = null;
-        for (const m of neighbours.get(n.id)) if (positions.has(m)) { anchor = positions.get(m); break; }
-        const a = Math.random() * 2 * Math.PI, d = kind === "entry" ? 20 : 60;
-        positions.set(n.id, {
-          x: (anchor ? anchor.x : 0) + Math.cos(a) * d,
-          y: (anchor ? anchor.y : 0) + Math.sin(a) * d,
-          vx: 0, vy: 0,
-        });
+    const byId = new Map(data.nodes.map((n) => [n.id, n]));
+    const els = [];
+    for (const n of data.nodes) {
+      if (!keep.has(n.id)) continue;
+      const el = { group: "nodes", data: { ...n } };
+      // In clusters, tasks and entries live inside their project's box.
+      if (clusters && (n.kind === "task" || n.kind === "entry") && keep.has("project:" + n.project)) {
+        el.data.parent = "project:" + n.project;
       }
+      if (positions.has(n.id)) el.position = positions.get(n.id);
+      els.push(el);
     }
-    for (const n of nodes) {
-      n.p = positions.get(n.id);
-      n.r = radius(n);
-      if (n.col != null && Math.abs(n.p.x - n.col) > COLUMN) n.p.x = n.col + (Math.random() - 0.5) * 20;
-    }
-  }
-
-  // --- drawing --------------------------------------------------------------
-
-  function draw() {
-    edgeLayer.replaceChildren();
-    nodeLayer.replaceChildren();
-
-    for (const e of edges) {
-      const line = el("line", { class: "edge rel-" + e.rel });
-      if (e.rel === "waits" || e.rel === "waited") line.setAttribute("marker-end", "url(#arrow)");
-      e.line = line;
-      e.s = byId.get(e.source);
-      e.t = byId.get(e.target);
-      edgeLayer.append(line);
-    }
-
-    // Big things underneath, so an entry dot is never hidden by its project.
-    const sorted = nodes.slice().sort((a, b) => b.r - a.r);
-    for (const n of sorted) {
-      const g = el("g", { class: `node kind-${n.kind} state-${n.state || "none"}` });
-      let shape;
-      if (n.kind === "repo") {
-        const s = n.r * 1.7;
-        shape = el("rect", { x: -s / 2, y: -s / 2, width: s, height: s, rx: 3 });
-      } else {
-        shape = el("circle", { r: n.r });
-      }
-      g.append(shape);
-      if (n.kind !== "entry") {
-        const label = el("text", { y: n.r + 12, class: "label" });
-        label.textContent = n.kind === "project" ? n.label : shorten(n.label, 28);
-        g.append(label);
-      }
-      g.addEventListener("pointerenter", () => setHover(n));
-      g.addEventListener("pointerleave", () => setHover(null));
-      g.addEventListener("pointerdown", (ev) => startDrag(ev, n));
-      g.addEventListener("dblclick", (ev) => {
-        ev.stopPropagation();
-        focus = n.id;
-        fitting = true;
-        rebuild();
+    const FLIP = new Set(["waits", "waited", "in", "logged"]);
+    for (const e of data.edges) {
+      if (!keep.has(e.source) || !keep.has(e.target)) continue;
+      // The box already says a task or entry belongs to its project.
+      if (clusters && e.rel === "in") continue;
+      if (clusters && e.rel === "logged" && byId.get(e.target)?.kind === "project") continue;
+      const flip = !clusters && FLIP.has(e.rel);
+      els.push({
+        group: "edges",
+        classes: flip ? "flipped" : "",
+        data: {
+          id: `${e.rel}:${e.source}>${e.target}`, rel: e.rel, weight: e.weight,
+          source: flip ? e.target : e.source, target: flip ? e.source : e.target,
+        },
       });
-      n.g = g;
-      nodeLayer.append(g);
     }
-    highlight();
-  }
 
-  function shorten(s, max) {
-    return s.length > max ? "…" + s.slice(s.length - max + 1) : s;
-  }
-
-  function render() {
-    for (const e of edges) {
-      const s = e.s.p, t = e.t.p;
-      let x2 = t.x, y2 = t.y;
-      if (e.line.hasAttribute("marker-end")) {
-        // Stop the arrow at the rim of the node it points at.
-        const dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1;
-        x2 = t.x - (dx / d) * (e.t.r + 2);
-        y2 = t.y - (dy / d) * (e.t.r + 2);
-      }
-      e.line.setAttribute("x1", s.x);
-      e.line.setAttribute("y1", s.y);
-      e.line.setAttribute("x2", x2);
-      e.line.setAttribute("y2", y2);
+    cy.batch(() => {
+      cy.elements().remove();
+      cy.add(els);
+    });
+    run(fresh);
+    counts();
+    const sel = selected && cy.getElementById(selected);
+    if (sel && sel.nonempty()) {
+      sel.select();
+      highlight(sel);
     }
-    for (const n of nodes) n.g.setAttribute("transform", `translate(${n.p.x},${n.p.y})`);
-    viewport.setAttribute("transform", `translate(${view.x},${view.y}) scale(${view.k})`);
   }
 
-  // highlight dims everything but the hovered node's neighbourhood, or
-  // everything that does not match the search.
-  function highlight() {
+  function run(fresh) {
+    const opts = layoutMode() === "flow"
+      ? {
+          name: "dagre", rankDir: "LR", nodeSep: 14, rankSep: 90, edgeSep: 6,
+          nodeDimensionsIncludeLabels: true, animate: !fresh, animationDuration: 400, fit: true, padding: 40,
+        }
+      : {
+          name: "fcose", quality: "default", randomize: fresh || positions.size === 0,
+          animate: !fresh, animationDuration: 500, fit: true, padding: 40,
+          nodeDimensionsIncludeLabels: true, packComponents: true, nestingFactor: 0.08,
+          gravity: 0.3, gravityCompound: 1.2, tilingPaddingVertical: 20, tilingPaddingHorizontal: 20,
+          nodeRepulsion: (n) => (n.data("kind") === "entry" ? 1500 : 9000),
+          idealEdgeLength: (e) =>
+            ({ logged: 25, about: 140, owns: 160, uses: 160, touches: 130, waits: 70, waited: 70 })[e.data("rel")] || 100,
+          edgeElasticity: (e) =>
+            ({ logged: 0.9, about: 0.05, touches: 0.1, owns: 0.2, uses: 0.1 })[e.data("rel")] || 0.45,
+        };
+    cy.layout(opts).run();
+  }
+
+  function counts() {
+    const k = (kind) => cy.nodes(`[kind='${kind}']`).length;
+    const warn = cy.nodes("[warn > 0]").length;
+    ui.count.textContent =
+      `${k("project")} projects · ${k("task")} tasks · ${k("repo")} repos` +
+      (k("entry") ? ` · ${k("entry")} entries` : "") +
+      (warn ? ` · ${warn} with warnings` : "") +
+      (focus ? " · focused (double-click the background to clear)" : "");
+  }
+
+  // --- highlight, search, tooltip -------------------------------------------
+
+  function neighbourhood(node) {
+    let hood = node.closedNeighborhood();
+    // A box's neighbourhood is its members and what they touch.
+    if (node.isParent()) hood = hood.union(node.children()).union(node.children().closedNeighborhood());
+    return hood.union(hood.parents());
+  }
+
+  function highlight(node) {
+    cy.elements().removeClass("faded hl");
+    if (!node) return applySearch();
+    const hood = neighbourhood(node);
+    cy.elements().not(hood).addClass("faded");
+    hood.addClass("hl");
+  }
+
+  function applySearch() {
     const q = ui.search.value.trim().toLowerCase();
-    let lit = null;
-    if (hover) {
-      lit = new Set([hover.id, ...neighbours.get(hover.id)]);
-    } else if (q) {
-      lit = new Set(
-        nodes.filter((n) => (n.label + " " + (n.title || "") + " " + (n.detail || "")).toLowerCase().includes(q)).map((n) => n.id)
-      );
-    }
-    for (const n of nodes) n.g.classList.toggle("dim", !!lit && !lit.has(n.id));
-    for (const e of edges) {
-      const on = lit && (hover ? e.source === hover.id || e.target === hover.id : lit.has(e.source) && lit.has(e.target));
-      e.line.classList.toggle("dim", !!lit && !on);
-      e.line.classList.toggle("lit", !!on);
-    }
+    cy.elements().removeClass("faded hl");
+    if (!q) return cy.collection();
+    const hits = cy.nodes().filter((n) =>
+      [n.data("label"), n.data("title"), n.data("detail")].join(" ").toLowerCase().includes(q));
+    cy.elements().not(hits.union(hits.parents())).addClass("faded");
+    hits.addClass("hl");
+    return hits;
   }
 
-  function setHover(n) {
-    if (drag) return;
-    hover = n;
-    highlight();
-    if (!n) { tip.hidden = true; return; }
-    const kind = n.kind === "entry" ? `${n.label} · ${n.project}` : n.kind;
-    let html = `<div class="tip-kind">${esc(kind)}${n.state ? " · " + esc(n.state) : ""}</div>`;
-    html += `<div class="tip-title">${esc(n.kind === "entry" ? n.title : n.label)}</div>`;
-    if (n.kind !== "entry" && n.title && n.title !== n.label) html += `<div>${esc(n.title)}</div>`;
-    if (n.detail) html += `<div class="muted">${esc(n.kind === "repo" ? "projects: " + n.detail : n.detail)}</div>`;
-    if (n.kind === "task" || n.kind === "project") html += `<div class="muted">${n.weight} entries${n.ts ? " · last " + esc(n.ts) : ""}</div>`;
-    if (n.kind === "repo") html += `<div class="muted">${n.weight} repo-scoped findings</div>`;
-    if (n.kind === "entry" && n.ts) html += `<div class="muted">${esc(n.ts)}</div>`;
-    tip.innerHTML = html;
-    tip.hidden = false;
-  }
-
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-  }
-
-  svg.addEventListener("pointermove", (ev) => {
-    if (tip.hidden) return;
-    const box = svg.getBoundingClientRect();
-    tip.style.left = Math.min(ev.clientX - box.left + 14, box.width - 320) + "px";
-    tip.style.top = ev.clientY - box.top + 14 + "px";
+  cy.on("mouseover", "node", (ev) => {
+    const n = ev.target.data();
+    const kind = n.kind === "entry" ? `${n.label} · ${n.state}` : n.kind + (n.state ? " · " + n.state : "");
+    const title = n.kind === "entry" ? n.title : n.label;
+    const sub = n.kind !== "entry" && n.title && n.title !== n.label ? n.title : "";
+    let html = `<div class="tip-kind">${esc(kind)}</div><div class="tip-title">${esc(title || "")}</div>`;
+    if (sub) html += `<div>${esc(sub)}</div>`;
+    if (n.kind === "repo" && n.detail) html += `<div class="muted">${esc(n.detail)}</div>`;
+    if (n.warn) html += `<div class="warn">${n.warn} warning${n.warn > 1 ? "s" : ""}, see the panel</div>`;
+    ui.tip.innerHTML = html;
+    ui.tip.hidden = false;
+  });
+  cy.on("mouseout", "node", () => { ui.tip.hidden = true; });
+  cy.on("mousemove", (ev) => {
+    if (ui.tip.hidden) return;
+    const p = ev.renderedPosition;
+    ui.tip.style.left = p.x + 16 + "px";
+    ui.tip.style.top = p.y + 16 + "px";
   });
 
-  // --- simulation -----------------------------------------------------------
-
-  function kick(a) {
-    alpha = Math.max(alpha, a);
-    if (!running) { running = true; requestAnimationFrame(tick); }
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
   }
 
-  function tick() {
-    step();
-    if (fitting) fit();
-    render();
-    alpha *= 0.975;
-    if (alpha > 0.004 || drag) requestAnimationFrame(tick);
-    else running = false;
+  // --- detail panel ---------------------------------------------------------
+
+  function detailURL(n) {
+    const q = new URLSearchParams({ kind: n.kind });
+    if (n.kind !== "repo") q.set("project", n.project);
+    if (n.kind === "task") q.set("task", n.label);
+    if (n.kind === "repo") q.set("repo", n.label);
+    if (n.kind === "entry") q.set("file", n.file);
+    return "/graph/node?" + q;
   }
 
-  function step() {
-    const n = nodes.length;
-    // Repulsion, scaled by size so a project pushes its neighbours further out.
-    for (let i = 0; i < n; i++) {
-      const a = nodes[i];
-      for (let j = i + 1; j < n; j++) {
-        const b = nodes[j];
-        let dx = b.p.x - a.p.x, dy = b.p.y - a.p.y;
-        let d2 = dx * dx + dy * dy;
-        if (d2 === 0) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d2 = 0.25; }
-        if (d2 > 640000) continue; // 800px: too far to matter
-        const charge = (a.kind === "entry" && b.kind === "entry" ? 60 : 1100) * (1 + (a.r + b.r) / 20);
-        const d = Math.sqrt(d2);
-        // Never closer than the two rims for the force: at near-zero distance
-        // 1/d² flings a node off the canvas, and the fit then zooms out to it.
-        const f = (charge * alpha) / Math.max(d2, (a.r + b.r) * (a.r + b.r), 100);
-        const fx = (dx / d) * f, fy = (dy / d) * f;
-        a.p.vx -= fx; a.p.vy -= fy;
-        b.p.vx += fx; b.p.vy += fy;
-      }
-    }
-    // Springs. In columns, a task's place is its column, so its pull on the
-    // project and the repos is only a hint for the vertical order.
-    const columns = nodes.some((nd) => nd.col != null);
-    for (const e of edges) {
-      const s = e.s.p, t = e.t.p;
-      const dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1;
-      let want = (LENGTH[e.rel] || 100) + e.s.r + e.t.r;
-      // A spring shorter than the gap between its two columns would pull
-      // both ends onto one horizontal line; let it rest across the gap.
-      if (e.s.col != null && e.t.col != null) want = Math.max(want, Math.abs(e.s.col - e.t.col) * 1.15);
-      let strength = STRENGTH[e.rel] || 0.1;
-      if (columns && (e.rel === "in" || e.rel === "touches" || e.rel === "owns" || e.rel === "uses")) strength *= 0.05;
-      const f = ((d - want) / d) * strength * alpha;
-      s.vx += dx * f; s.vy += dy * f;
-      t.vx -= dx * f; t.vy -= dy * f;
-    }
-    // A weak pull to the middle keeps unconnected projects on screen.
-    for (const nd of nodes) {
-      const p = nd.p;
-      if (nd.kind === "project" && nd.col != null) {
-        p.x = nd.col; p.y = 0; p.vx = p.vy = 0;
-        continue;
-      }
-      if (nd.col != null) {
-        p.vx += (nd.col - p.x) * 0.2 * alpha;
-      } else {
-        p.vx -= p.x * 0.008 * alpha;
-      }
-      p.vy -= p.y * (nd.col != null ? 0.003 : 0.008) * alpha;
-      if (nd === dragNode) { p.vx = p.vy = 0; continue; }
-      p.vx *= 0.6; p.vy *= 0.6;
-      const v = Math.hypot(p.vx, p.vy);
-      if (v > 40) { p.vx *= 40 / v; p.vy *= 40 / v; }
-      p.x += p.vx; p.y += p.vy;
-    }
+  async function show(node) {
+    selected = node.id();
+    syncURL();
+    highlight(node);
+    ui.panel.hidden = false;
+    ui.body.innerHTML = '<p class="muted">Loading…</p>';
+    const res = await fetch(detailURL(node.data()));
+    const html = await res.text();
+    // A later click may have arrived while this one loaded.
+    if (selected !== node.id()) return;
+    ui.body.innerHTML = res.ok ? html : `<div class="error">${esc(html)}</div>`;
+    ui.panel.scrollTop = 0;
   }
+
+  function hide() {
+    selected = null;
+    ui.panel.hidden = true;
+    cy.nodes().unselect();
+    highlight(null);
+    syncURL();
+  }
+
+  // Links in the panel that name a node select it here instead of leaving.
+  ui.body.addEventListener("click", (ev) => {
+    const a = ev.target.closest("a[data-node]");
+    if (!a || ev.metaKey || ev.ctrlKey) return;
+    let id = a.dataset.node;
+    if (id.startsWith("repo:")) id = id.toLowerCase();
+    const node = cy.getElementById(id);
+    if (node.empty()) return; // filtered out of the picture: follow the link
+    ev.preventDefault();
+    cy.nodes().unselect();
+    node.select();
+    cy.animate({ center: { eles: node }, duration: 300 });
+    show(node);
+  });
+  ui.close.addEventListener("click", hide);
 
   // --- interaction ----------------------------------------------------------
 
-  let drag = null, dragNode = null;
+  // Cytoscape has no double-tap event; two taps on one target inside 350 ms are one.
+  let lastTap = { id: null, t: 0 };
+  cy.on("tap", (ev) => {
+    const id = ev.target === cy ? "bg" : ev.target.id();
+    const now = Date.now();
+    const double = lastTap.id === id && now - lastTap.t < 350;
+    lastTap = double ? { id: null, t: 0 } : { id, t: now };
 
-  function toGraph(ev) {
-    const box = svg.getBoundingClientRect();
-    return { x: (ev.clientX - box.left - view.x) / view.k, y: (ev.clientY - box.top - view.y) / view.k };
-  }
-
-  function startDrag(ev, n) {
-    ev.stopPropagation();
-    const at = toGraph(ev);
-    drag = { kind: "node", node: n, dx: n.p.x - at.x, dy: n.p.y - at.y, moved: false, x0: ev.clientX, y0: ev.clientY };
-    dragNode = n;
-    tip.hidden = true;
-  }
-
-  svg.addEventListener("pointerdown", (ev) => {
-    fitting = false;
-    drag = { kind: "pan", x: ev.clientX - view.x, y: ev.clientY - view.y, moved: false, x0: ev.clientX, y0: ev.clientY };
-    svg.classList.add("panning");
-  });
-
-  // Moves and releases are followed on the window, not the SVG, so a drag
-  // survives leaving the canvas — and without pointer capture, which would
-  // retarget the double-click that focuses a node.
-  window.addEventListener("pointermove", (ev) => {
-    if (!drag) return;
-    if (Math.hypot(ev.clientX - drag.x0, ev.clientY - drag.y0) > 3) drag.moved = true;
-    if (drag.kind === "pan") {
-      view.x = ev.clientX - drag.x;
-      view.y = ev.clientY - drag.y;
-      render();
-    } else if (drag.moved) {
-      fitting = false;
-      const at = toGraph(ev);
-      drag.node.p.x = at.x + drag.dx;
-      drag.node.p.y = at.y + drag.dy;
-      kick(0.3);
+    if (id === "bg") {
+      if (double && focus) {
+        focus = null;
+        rebuild(false);
+      } else if (!double) {
+        hide();
+      }
+      return;
     }
-  });
-
-  window.addEventListener("pointerup", (ev) => {
-    const d = drag;
-    drag = null;
-    dragNode = null;
-    svg.classList.remove("panning");
-    if (d && d.kind === "node" && !d.moved && d.node.url) {
-      // Wait a moment so a double-click can cancel the navigation.
-      const n = d.node;
-      clearTimeout(svg._open);
-      svg._open = setTimeout(() => {
-        if (ev.metaKey || ev.ctrlKey) window.open(n.url, "_blank");
-        else location.href = n.url;
-      }, 260);
+    if (double) {
+      focus = id;
+      rebuild(false);
+      return;
     }
+    show(ev.target);
   });
 
-  svg.addEventListener("dblclick", () => {
-    clearTimeout(svg._open);
-    if (focus) { focus = null; fitting = true; rebuild(); }
+  ui.search.addEventListener("input", () => { if (!selected) applySearch(); });
+  ui.search.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    const hits = applySearch();
+    if (hits.nonempty()) cy.animate({ fit: { eles: hits, padding: 80 }, duration: 400 });
+    if (hits.length === 1) show(hits[0]);
   });
-  nodeLayer.addEventListener("dblclick", () => clearTimeout(svg._open), true);
+  ui.fit.addEventListener("click", () => cy.animate({ fit: { padding: 40 }, duration: 300 }));
+  ui.project.addEventListener("change", () => {
+    focus = null;
+    selected = null;
+    ui.panel.hidden = true;
+    load();
+  });
+  ui.layout.addEventListener("change", () => { positions.clear(); syncURL(); rebuild(true); });
+  ui.entries.addEventListener("change", () => { syncURL(); rebuild(false); });
+  ui.closed.addEventListener("change", () => rebuild(false));
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") hide(); });
 
-  svg.addEventListener("wheel", (ev) => {
-    ev.preventDefault();
-    fitting = false;
-    const box = svg.getBoundingClientRect();
-    const mx = ev.clientX - box.left, my = ev.clientY - box.top;
-    const k = Math.min(4, Math.max(0.15, view.k * Math.exp(-ev.deltaY * 0.0015)));
-    view.x = mx - ((mx - view.x) * k) / view.k;
-    view.y = my - ((my - view.y) * k) / view.k;
-    view.k = k;
-    render();
-  }, { passive: false });
-
-  // fit points the camera at everything drawn, leaving room for the legend.
-  function fit() {
-    if (!nodes.length) return;
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const n of nodes) {
-      x0 = Math.min(x0, n.p.x - n.r); x1 = Math.max(x1, n.p.x + n.r);
-      y0 = Math.min(y0, n.p.y - n.r); y1 = Math.max(y1, n.p.y + n.r + 14);
-    }
-    const box = svg.getBoundingClientRect(), pad = 40;
-    const k = Math.min(1.3, Math.max(0.15, Math.min((box.width - 2 * pad) / (x1 - x0 || 1), (box.height - 2 * pad) / (y1 - y0 || 1))));
-    view = { k, x: box.width / 2 - ((x0 + x1) / 2) * k, y: box.height / 2 - ((y0 + y1) / 2) * k };
-  }
-
-  function centre() {
-    const box = svg.getBoundingClientRect();
-    view = { x: box.width / 2, y: box.height / 2, k: 0.8 };
-  }
-
-  ui.project.addEventListener("change", () => { positions.clear(); centre(); load(); });
-  ui.entries.addEventListener("change", () => {
+  // The view's state lives in the URL, so a picture can be bookmarked or sent.
+  function syncURL() {
     const url = new URL(location.href);
-    if (ui.entries.checked) url.searchParams.set("entries", "1"); else url.searchParams.delete("entries");
+    const set = (k, v) => (v ? url.searchParams.set(k, v) : url.searchParams.delete(k));
+    set("project", ui.project.value);
+    set("layout", ui.layout.value === "auto" ? "" : ui.layout.value);
+    set("entries", ui.entries.checked ? "1" : "");
+    set("node", selected || "");
     history.replaceState(null, "", url);
-    fitting = true;
-    rebuild();
-  });
-  ui.closed.addEventListener("change", () => { fitting = true; rebuild(); });
-  ui.search.addEventListener("input", highlight);
+  }
 
   const params = new URLSearchParams(location.search);
   if (params.get("entries") === "1") ui.entries.checked = true;
-  centre();
-  load();
+  if (["clusters", "flow"].includes(params.get("layout"))) ui.layout.value = params.get("layout");
+  const wanted = params.get("node");
+
+  load().then(() => {
+    const node = wanted && cy.getElementById(wanted);
+    if (node && node.nonempty()) {
+      node.select();
+      show(node);
+    }
+  });
 })();

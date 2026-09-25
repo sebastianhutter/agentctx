@@ -10,27 +10,44 @@
       {{range .Projects}}<option value="{{.}}" {{if eq . $.Project}}selected{{end}}>{{.}}</option>{{end}}
     </select>
   </label>
+  <label>Layout
+    <select id="g-layout">
+      <option value="auto">auto</option>
+      <option value="clusters">projects as clusters</option>
+      <option value="flow">dependency flow</option>
+    </select>
+  </label>
   <label><input type="checkbox" id="g-entries"> log entries</label>
   <label><input type="checkbox" id="g-closed" checked> closed tasks</label>
-  <label><input type="search" id="g-search" placeholder="highlight…"></label>
+  <label><input type="search" id="g-search" placeholder="search… (enter zooms)"></label>
+  <button type="button" id="g-fit" class="quiet">fit</button>
   <span class="muted" id="g-count"></span>
 </div>
 
 <div class="graph-wrap">
-  <svg id="graph" role="img" aria-label="Projects, tasks, repositories and log entries"></svg>
+  <div id="graph" role="img" aria-label="Projects, tasks, repositories and log entries"></div>
   <div id="g-tip" class="graph-tip" hidden></div>
+  <aside id="g-panel" class="graph-panel" hidden>
+    <button type="button" id="g-close" class="panel-close" aria-label="Close">×</button>
+    <div id="g-panel-body"></div>
+  </aside>
   <div class="graph-legend">
-    <div><span class="lg lg-project"></span>project</div>
-    <div><span class="lg lg-repo"></span>repository <span class="muted">· ring: shared by several projects</span></div>
+    <div><span class="lg lg-project"></span>project <span class="lg lg-repo"></span>repository <span class="muted">· dark border: shared by several projects</span></div>
     <div><span class="lg lg-task-ready"></span>task ready
       <span class="lg lg-task-blocked"></span>blocked
-      <span class="lg lg-task-closed"></span>closed</div>
+      <span class="lg lg-task-closed"></span>closed
+      <span class="lg lg-warn"></span>has a warning</div>
     <div><span class="lg lg-entry-repo"></span>repo
       <span class="lg lg-entry-project"></span>project
-      <span class="lg lg-entry-task"></span>task-scoped entry</div>
+      <span class="lg lg-entry-task"></span>task-scoped entry <span class="muted">· ◆ decision · ● finding · ■ note</span></div>
     <div><span class="ll ll-waits"></span>waits for <span class="ll ll-uses"></span>repo not on the project note</div>
-    <div class="muted">Drag to move · scroll to zoom · click to open · double-click to focus</div>
+    <div class="muted">Click for details · double-click to focus · drag, scroll to zoom</div>
   </div>
 </div>
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script src="/static/vendor/layout-base.js"></script>
+<script src="/static/vendor/cose-base.js"></script>
+<script src="/static/vendor/cytoscape-fcose.js"></script>
+<script src="/static/vendor/cytoscape-dagre.min.js"></script>
 <script src="/static/graph.js"></script>
 {{end}}

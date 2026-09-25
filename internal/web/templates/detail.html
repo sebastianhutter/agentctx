@@ -1,0 +1,95 @@
+{{/* Side-panel fragments for the graph page. A link with data-node selects
+     that node in the graph; without JavaScript it is an ordinary link. */}}
+
+{{define "kinds"}}{{if .}}<p class="kinds">{{range .}}<span class="pill kind-{{.Kind}}">{{.Count}} {{.Kind}}</span> {{end}}</p>{{end}}{{end}}
+
+{{define "detail-project"}}
+<div class="panel-kind">project</div>
+<h2 class="panel-title"><a href="/project/{{.Project.ID}}">{{if .Project.Name}}{{.Project.Name}}{{else}}{{.Project.ID}}{{end}}</a></h2>
+<p class="muted"><code>{{.Project.ID}}</code>
+  {{if .Project.JiraProjects}} · keys {{join .Project.JiraProjects ", "}}{{else}} · <span class="warn">no tracker keys</span>{{end}}
+  {{if not .Consolidated}} · <span class="warn">note not consolidated</span>{{end}}</p>
+{{if .Last}}<p class="muted">Last activity {{.Last.TS}} ({{age .Last.TS}}) on {{.Last.Host}}</p>{{end}}
+{{template "kinds" .Kinds}}
+
+<dl class="facts">
+  <dt>Ready</dt><dd>{{range .Ready}}<a href="/project/{{$.Project.ID}}/task/{{.}}" data-node="task:{{$.Project.ID}}/{{.}}">{{.}}</a> {{else}}<span class="muted">none</span>{{end}}</dd>
+  {{if .Blocked}}<dt>Blocked</dt><dd>{{range .Blocked}}<a href="/project/{{$.Project.ID}}/task/{{.}}" data-node="task:{{$.Project.ID}}/{{.}}">{{.}}</a> {{end}}</dd>{{end}}
+  {{if .Closed}}<dt>Closed</dt><dd class="muted">{{range .Closed}}<a href="/project/{{$.Project.ID}}/task/{{.}}" data-node="task:{{$.Project.ID}}/{{.}}">{{.}}</a> {{end}}</dd>{{end}}
+  <dt>Repos</dt><dd>{{range .Project.Repos}}<a href="/log?repo={{.}}" data-node="repo:{{.}}">{{.}}</a><br>{{else}}<span class="muted">none listed</span>{{end}}</dd>
+</dl>
+
+{{if .Issues}}<h3>Checks</h3>{{template "issuelist" .Issues}}{{end}}
+
+<h3>Recent entries</h3>
+{{template "entrylist" .Recent}}
+<p><a href="/log?project={{.Project.ID}}">All entries →</a></p>
+{{end}}
+
+{{define "detail-task"}}
+<div class="panel-kind">task · <span class="state-{{.State}}">{{.State}}</span></div>
+<h2 class="panel-title"><a href="/project/{{.ProjectID}}/task/{{.Task.ID}}">{{if .Task.Title}}{{.Task.Title}}{{else}}{{.Task.ID}}{{end}}</a></h2>
+<p class="muted"><code>{{.Task.ID}}</code> in <a href="/project/{{.ProjectID}}" data-node="project:{{.ProjectID}}">{{.ProjectID}}</a>
+  {{if .Task.SourceKey}} · {{.Task.Source}} {{.Task.SourceKey}}{{else if .Task.Source}} · {{.Task.Source}}{{end}}</p>
+{{if .Task.SourceURL}}<p><a href="{{.Task.SourceURL}}" target="_blank" rel="noreferrer">{{.Task.SourceURL}}</a></p>{{end}}
+<p class="muted">
+  {{if .Opened}}Opened {{.Opened.TS}}{{end}}{{if .Last}} · last activity {{age .Last.TS}}{{end}}
+  {{if .Hosts}}<br>Written by {{join .Hosts ", "}}{{end}}
+</p>
+{{template "kinds" .Kinds}}
+
+<dl class="facts">
+  {{if .WaitsFor}}<dt>Waits for</dt><dd>{{range .WaitsFor}}<a href="/project/{{$.ProjectID}}/task/{{.ID}}" data-node="task:{{$.ProjectID}}/{{.ID}}" {{if .Closed}}class="done"{{end}}>{{.ID}}</a>{{if .Closed}} <span class="muted">(closed)</span>{{end}} {{end}}</dd>{{end}}
+  {{if .Blocks}}<dt>Blocks</dt><dd>{{range .Blocks}}<a href="/project/{{$.ProjectID}}/task/{{.ID}}" data-node="task:{{$.ProjectID}}/{{.ID}}" {{if .Closed}}class="done"{{end}}>{{.ID}}</a> {{end}}</dd>{{end}}
+  <dt>Repos</dt><dd>{{range .Repos}}<a href="/log?repo={{.Repo}}" data-node="repo:{{.Repo}}">{{.Repo}}</a>
+      <span class="muted">{{if .Entries}}{{plural .Entries "entry" "entries"}}{{end}}{{if not .Listed}} · not on the task note{{end}}</span><br>
+    {{else}}<span class="muted">none</span>{{end}}</dd>
+</dl>
+
+{{if .Issues}}<h3>Checks</h3>{{template "issuelist" .Issues}}{{end}}
+
+{{if .Consolidated}}
+<details class="panel-body"><summary>Consolidated note</summary><div class="note">{{.Body}}</div></details>
+{{else}}
+<p class="nudge">Not consolidated yet — the entries below are all there is.</p>
+{{end}}
+
+<h3>{{if .More}}Latest entries{{else}}Entries{{end}}</h3>
+{{template "entrylist" .Recent}}
+<p><a href="/project/{{.ProjectID}}/task/{{.Task.ID}}">Open the task →</a></p>
+{{end}}
+
+{{define "detail-repo"}}
+<div class="panel-kind">repository</div>
+<h2 class="panel-title"><a href="/log?repo={{.Repo}}">{{.Repo}}</a></h2>
+<p class="muted">{{plural .Findings "repo-scoped finding"}} across {{plural (len .Projects) "project"}}</p>
+
+<table class="panel-table">
+  <thead><tr><th>Project</th><th>Findings</th><th>Note</th><th>Tasks</th></tr></thead>
+  <tbody>
+  {{range .Projects}}
+    <tr>
+      <td><a href="/project/{{.Project}}" data-node="project:{{.Project}}">{{.Project}}</a>{{if not .Listed}}<br><span class="warn">not listed</span>{{end}}</td>
+      <td>{{.Findings}}</td>
+      <td>{{if .Consolidated}}<a href="/project/{{.Project}}/repo/{{$.Repo}}">yes</a>{{else}}<span class="muted">no</span>{{end}}</td>
+      <td>{{$p := .Project}}{{range .Tasks}}<a href="/project/{{$p}}/task/{{.}}" data-node="task:{{$p}}/{{.}}">{{.}}</a> {{else}}<span class="muted">—</span>{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+
+{{if .Issues}}<h3>Checks</h3>{{template "issuelist" .Issues}}{{end}}
+
+<h3>Latest findings</h3>
+{{template "entrylist" .Recent}}
+<p><a href="/log?repo={{.Repo}}">Every entry about this repo →</a></p>
+{{end}}
+
+{{define "detail-entry"}}
+<div class="panel-kind">log entry</div>
+{{range .Entry}}
+<p class="muted">in <a href="/project/{{$.ProjectID}}" data-node="project:{{$.ProjectID}}">{{$.ProjectID}}</a>{{if .Task}} · task <a href="/project/{{$.ProjectID}}/task/{{.Task}}" data-node="task:{{$.ProjectID}}/{{.Task}}">{{.Task}}</a>{{end}}{{if .Repo}} · repo <a href="/log?repo={{.Repo}}" data-node="repo:{{.Repo}}">{{.Repo}}</a>{{end}}</p>
+{{end}}
+{{template "entrylist" .Entry}}
+<p class="muted"><code>{{.File}}</code></p>
+{{end}}

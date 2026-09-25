@@ -167,8 +167,7 @@ main.wide { max-width: none; padding: 0; }
 .graph-bar h1 { margin: 0 .5rem 0 0; font-size: 1.15rem; }
 .graph-bar label { display: flex; align-items: center; gap: .35rem; font-size: .88rem; color: var(--muted); }
 .graph-wrap { position: relative; height: calc(100vh - 7.2rem); }
-#graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; user-select: none; }
-#graph.panning { cursor: grabbing; }
+#graph { position: absolute; inset: 0; }
 
 :root {
   --g-project: #2f6fd0; --g-repo: #8a5cc2; --g-ready: #2e8b57; --g-blocked: #c77800;
@@ -183,44 +182,13 @@ main.wide { max-width: none; padding: 0; }
   }
 }
 
-.edge { stroke: var(--g-edge); stroke-width: 1.2; transition: opacity .15s; }
-.edge.rel-logged { stroke-width: .7; }
-.edge.rel-about { stroke-dasharray: 2 3; stroke-width: .7; }
-.edge.rel-owns { stroke-width: 1.6; }
-.edge.rel-uses { stroke: var(--warn); stroke-dasharray: 5 4; stroke-width: 1.4; }
-.edge.rel-waits { stroke: var(--g-blocked); stroke-width: 1.8; }
-.edge.rel-waited { stroke: var(--g-closed); stroke-dasharray: 4 3; }
-.edge.lit { stroke-opacity: 1; stroke-width: 2.2; }
-.edge.dim { opacity: .12; }
-.arrow { fill: var(--g-blocked); }
-
-.node { cursor: pointer; transition: opacity .15s; }
-.node.dim { opacity: .15; }
-.node circle, .node rect { stroke: var(--panel); stroke-width: 1.5; }
-.node .label { font-size: 10.5px; fill: var(--ink); text-anchor: middle; pointer-events: none;
-               paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
-.kind-project .label { font-size: 13px; font-weight: 650; }
-.kind-task .label { fill: var(--muted); }
-.kind-project circle { fill: var(--g-project); }
-.kind-project.state-unconsolidated circle { fill: var(--panel); stroke: var(--g-project); stroke-width: 3; }
-.kind-repo rect { fill: var(--g-repo); }
-.kind-repo.state-unconsolidated rect, .kind-repo.state-shared-unconsolidated rect { fill-opacity: .45; }
-.kind-repo.state-shared-consolidated rect, .kind-repo.state-shared-unconsolidated rect { stroke: var(--ink); stroke-width: 2.5; }
-.kind-task.state-ready circle { fill: var(--g-ready); }
-.kind-task.state-blocked circle { fill: var(--g-blocked); }
-.kind-task.state-closed circle { fill: var(--g-closed); }
-.kind-entry circle { stroke-width: .8; }
-.kind-entry.state-repo circle { fill: var(--g-e-repo); }
-.kind-entry.state-project circle { fill: var(--g-e-project); }
-.kind-entry.state-task circle { fill: var(--g-e-task); }
-
 .graph-tip { position: absolute; max-width: 300px; pointer-events: none; z-index: 5;
              background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
              padding: .5rem .7rem; font-size: .82rem; box-shadow: 0 4px 16px rgba(0,0,0,.12); }
 .graph-tip .tip-kind { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; }
 .graph-tip .tip-title { font-weight: 600; margin: .1rem 0 .2rem; overflow-wrap: anywhere; }
 
-.graph-legend { position: absolute; left: 1rem; bottom: 1rem; font-size: .78rem; line-height: 1.8;
+.graph-legend { position: absolute; left: 1rem; bottom: 1rem; z-index: 4; font-size: .78rem; line-height: 1.8;
                 background: color-mix(in srgb, var(--panel) 90%, transparent);
                 border: 1px solid var(--line); border-radius: 8px; padding: .5rem .8rem; }
 .lg { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 .35rem 0 .5rem; vertical-align: -1px; }
@@ -230,6 +198,7 @@ main.wide { max-width: none; padding: 0; }
 .lg-task-ready { background: var(--g-ready); }
 .lg-task-blocked { background: var(--g-blocked); }
 .lg-task-closed { background: var(--g-closed); }
+.lg-warn { background: color-mix(in srgb, var(--warn) 40%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 30%, transparent); }
 .lg-entry-repo { background: var(--g-e-repo); width: 7px; height: 7px; }
 .lg-entry-project { background: var(--g-e-project); width: 7px; height: 7px; }
 .lg-entry-task { background: var(--g-e-task); width: 7px; height: 7px; }
@@ -237,3 +206,33 @@ main.wide { max-width: none; padding: 0; }
       border-top: 2px solid var(--g-blocked); }
 .graph-legend div > .ll:first-child { margin-left: 0; }
 .ll-uses { border-top: 2px dashed var(--warn); }
+
+button.quiet { background: var(--bg); color: var(--ink); border-color: var(--line); font-weight: 500; padding: .35rem .8rem; }
+
+/* The detail panel beside the graph. */
+.graph-panel { position: absolute; top: 0; right: 0; bottom: 0; width: min(460px, 45vw); z-index: 6;
+               overflow-y: auto; background: var(--panel); border-left: 1px solid var(--line);
+               padding: 1rem 1.1rem 3rem; box-shadow: -6px 0 18px rgba(0,0,0,.06); font-size: .9rem; }
+.graph-panel[hidden] { display: none; }
+.panel-close { position: sticky; top: 0; float: right; background: none; color: var(--muted);
+               font-size: 1.4rem; line-height: 1; padding: 0 .3rem; border: 0; }
+.panel-close:hover { color: var(--ink); filter: none; }
+.panel-kind { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
+.panel-title { margin: .15rem 0 .4rem; font-size: 1.15rem; text-transform: none; letter-spacing: 0; color: var(--ink); }
+.panel-title a { color: inherit; text-decoration: none; }
+.panel-title a:hover { text-decoration: underline; }
+.graph-panel h3 { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 1.2rem 0 .5rem; }
+.graph-panel p { margin: .3rem 0; }
+.graph-panel .entry { padding: .6rem .75rem; font-size: .86rem; }
+.graph-panel .entry-head .right { margin-left: 0; width: 100%; }
+.kinds { display: flex; flex-wrap: wrap; gap: .3rem; margin: .5rem 0; }
+dl.facts { display: grid; grid-template-columns: 6.5rem 1fr; gap: .35rem .6rem; margin: .8rem 0; }
+dl.facts dt { color: var(--muted); }
+dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+a.done { color: var(--muted); text-decoration: line-through; }
+.state-ready { color: var(--g-ready); } .state-blocked { color: var(--g-blocked); } .state-closed { color: var(--muted); }
+table.panel-table { width: 100%; border-collapse: collapse; font-size: .85rem; margin: .6rem 0; }
+table.panel-table th { text-align: left; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--line); padding: .3rem .3rem; }
+table.panel-table td { border-bottom: 1px solid var(--line); padding: .35rem .3rem; vertical-align: top; }
+details.panel-body summary { cursor: pointer; color: var(--accent); margin: .6rem 0; }
+.graph-panel .note { font-size: .86rem; }

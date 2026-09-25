@@ -123,9 +123,15 @@ repo. Opened from the menu bar, or run on its own with `agentctx web`.
   it, so the repos that tie projects together are visible — Obsidian's graph has
   a note per project for the same repo and cannot show that. Task colour is
   ready/blocked/closed, arrows are dependencies, and a dashed line is a repo a
-  project writes about without listing it. With one project selected, tasks are
-  laid out in columns by dependency depth, so the order the work has to happen
-  in reads left to right. Click opens, double-click focuses a neighbourhood.
+  project writes about without listing it; a halo marks a node with a warning
+  from the checks. Across projects, each project is a box around its tasks; with
+  one project selected, tasks flow left to right by dependency, so the order the
+  work has to happen in reads off the page. Clicking a node opens a side panel
+  with everything known about it — for a task its source, blockers, repos,
+  entries by kind and the latest entries; for a repo every project that works on
+  it and its findings across all of them. Double-click focuses a neighbourhood;
+  the URL keeps the view, so it can be bookmarked. Drawn with Cytoscape.js,
+  vendored under `internal/web/static/vendor` (see `LICENSES.txt` there).
 - **Checks** (`/checks`, also printed by `agentctx doctor`) lists what makes
   recorded knowledge harder to reach: repos in use but missing from the project
   note, tracker keys no project claims (or two claim), a repo logged under a

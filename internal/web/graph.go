@@ -47,6 +47,10 @@ type graphNode struct {
 	// repo.
 	Weight int    `json:"weight"`
 	TS     string `json:"ts,omitempty"`
+	// Warn counts the warnings store.Check reports about this node.
+	Warn int `json:"warn,omitempty"`
+	// File is an entry's file name, which with Project identifies it.
+	File string `json:"file,omitempty"`
 }
 
 // graphEdge is a directed relation between two nodes.
@@ -54,7 +58,13 @@ type graphEdge struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
 	Rel    string `json:"rel"`
+	// Weight is how many times the relation was recorded: for a task → repo
+	// edge, the task note listing the repo plus each entry about it.
+	Weight int `json:"weight"`
 }
+
+// edgeKey identifies an edge regardless of its weight.
+type edgeKey struct{ source, target, rel string }
 
 // graphData is what /graph.json returns.
 type graphData struct {
@@ -67,7 +77,7 @@ type graphData struct {
 type graphBuilder struct {
 	nodes map[string]*graphNode
 	order []string
-	edges map[graphEdge]bool
+	edges map[edgeKey]int
 }
 
 func (b *graphBuilder) node(n graphNode) *graphNode {
@@ -83,13 +93,15 @@ func (b *graphBuilder) edge(source, target, rel string) {
 	if source == target {
 		return
 	}
-	b.edges[graphEdge{Source: source, Target: target, Rel: rel}] = true
+	b.edges[edgeKey{source, target, rel}]++
 }
 
-func projectNodeID(p string) string     { return "project:" + p }
-func taskNodeID(p, t string) string     { return "task:" + p + "/" + t }
-func repoNodeID(repo string) string     { return "repo:" + strings.ToLower(repo) }
-func entryNodeID(e *store.Entry) string { return "entry:" + filepath.Base(e.Path) }
+func projectNodeID(p string) string { return "project:" + p }
+func taskNodeID(p, t string) string { return "task:" + p + "/" + t }
+func repoNodeID(repo string) string { return "repo:" + strings.ToLower(repo) }
+func entryNodeID(p string, e *store.Entry) string {
+	return "entry:" + p + "/" + filepath.Base(e.Path)
+}
 
 // buildGraph folds the vault into nodes and edges.
 //
@@ -108,7 +120,7 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 		return nil, err
 	}
 
-	b := &graphBuilder{nodes: map[string]*graphNode{}, edges: map[graphEdge]bool{}}
+	b := &graphBuilder{nodes: map[string]*graphNode{}, edges: map[edgeKey]int{}}
 	repoProjects := map[string]map[string]bool{}
 	repoConsolidated := map[string]bool{}
 
@@ -257,7 +269,7 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 				logURL += "&task=" + url.QueryEscape(e.Task)
 			}
 			enode := b.node(graphNode{
-				ID: entryNodeID(e), Kind: nodeEntry, Label: e.Kind, Title: entryTitle(e.Body),
+				ID: entryNodeID(pid, e), Kind: nodeEntry, File: filepath.Base(e.Path), Label: e.Kind, Title: entryTitle(e.Body),
 				Project: pid, State: e.Scope, Detail: detail, URL: logURL, Weight: 1, TS: e.TS,
 			})
 			b.edge(enode.ID, owner, relLogged)
@@ -284,12 +296,28 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 		}
 	}
 
+	// Warnings, attached to what they are about, so the graph can mark the
+	// places where recorded knowledge is not being found.
+	if issues, err := st.Check(); err == nil {
+		for _, i := range issues {
+			if i.Severity != store.SeverityWarn || i.Project == "" {
+				continue
+			}
+			for _, id := range []string{taskNodeID(i.Project, i.Subject), repoNodeID(i.Subject), projectNodeID(i.Project)} {
+				if n := b.nodes[id]; n != nil {
+					n.Warn++
+					break
+				}
+			}
+		}
+	}
+
 	out := &graphData{Projects: ids}
 	for _, id := range b.order {
 		out.Nodes = append(out.Nodes, *b.nodes[id])
 	}
-	for e := range b.edges {
-		out.Edges = append(out.Edges, e)
+	for k, n := range b.edges {
+		out.Edges = append(out.Edges, graphEdge{Source: k.source, Target: k.target, Rel: k.rel, Weight: n})
 	}
 	sort.Slice(out.Edges, func(i, j int) bool {
 		a, c := out.Edges[i], out.Edges[j]
