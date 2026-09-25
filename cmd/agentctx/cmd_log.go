@@ -23,6 +23,7 @@ var (
 	findingRepo     string
 	findingConf     string
 	findingTargetID string
+	supersedes      []string
 )
 
 var logDecisionCmd = &cobra.Command{
@@ -36,6 +37,7 @@ var logDecisionCmd = &cobra.Command{
 		entry, err := svc.LogDecision(service.LogDecisionRequest{
 			TaskID: decisionTaskID, Decision: decisionText, Rationale: rationaleText,
 			AlternativesRejected: alternatives, AffectedRepos: affectedRepos,
+			Supersedes: supersedes,
 		})
 		if err != nil {
 			return err
@@ -62,6 +64,7 @@ it.`,
 			TargetID: findingTargetID, Finding: findingText,
 			Source: store.Source{Kind: findingKind, Ref: findingRef, Retrieved: findingDate},
 			Scope:  findingScope, Repo: findingRepo, Confidence: findingConf,
+			Supersedes: supersedes,
 		})
 		if err != nil {
 			return err
@@ -81,6 +84,7 @@ func init() {
 	logDecisionCmd.Flags().StringVar(&rationaleText, "rationale", "", "Why (required)")
 	logDecisionCmd.Flags().StringSliceVar(&alternatives, "alternative", nil, "Option considered and dropped (repeatable)")
 	logDecisionCmd.Flags().StringSliceVar(&affectedRepos, "repo", nil, "Repository this decision changes (repeatable)")
+	logDecisionCmd.Flags().StringSliceVar(&supersedes, "supersedes", nil, "Id of an entry this one replaces (repeatable)")
 	logDecisionCmd.Flags().StringVar(&decisionTaskID, "task", "", "Task id (default: the bound task)")
 	_ = logDecisionCmd.MarkFlagRequired("decision")
 	_ = logDecisionCmd.MarkFlagRequired("rationale")
@@ -92,6 +96,7 @@ func init() {
 	logFindingCmd.Flags().StringVar(&findingScope, "scope", "", "task | repo | project (default task)")
 	logFindingCmd.Flags().StringVar(&findingRepo, "repo", "", "Repository the finding is about (required with --scope repo)")
 	logFindingCmd.Flags().StringVar(&findingConf, "confidence", "", "high | medium | low — only honoured when lower than derived")
+	logFindingCmd.Flags().StringSliceVar(&supersedes, "supersedes", nil, "Id of an entry this one replaces (repeatable)")
 	logFindingCmd.Flags().StringVar(&findingTargetID, "target", "", "Task or project id (default: the bound task)")
 	_ = logFindingCmd.MarkFlagRequired("finding")
 	_ = logFindingCmd.MarkFlagRequired("source-kind")

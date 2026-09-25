@@ -1,7 +1,7 @@
 {{define "entrylist"}}
 {{if not .}}<p class="muted">Nothing here.</p>{{end}}
 {{range .}}
-<article class="entry {{kindClass .Kind}}">
+<article class="entry {{kindClass .Kind}}{{if .SupersededBy}} superseded{{end}}">
   <div class="entry-head">
     <span class="pill {{kindClass .Kind}}">{{.Kind}}</span>
     {{if .Task}}<code>{{.Task}}</code>{{end}}
@@ -14,7 +14,9 @@
     <p class="source">{{.Source.Kind}}{{if .Source.Ref}} <code>{{.Source.Ref}}</code>{{end}}
     {{if .Source.Retrieved}}· retrieved {{.Source.Retrieved}}{{end}}</p>
   {{end}}
-  {{if .Stale}}<p class="stale">re-verify: {{.StaleReason}}</p>{{end}}
+  {{if .SupersededBy}}<p class="replaced">superseded by <code>{{.SupersededBy}}</code> — no longer returned to agents</p>
+  {{else if .Stale}}<p class="stale">re-verify: {{.StaleReason}}</p>{{end}}
+  {{if .Supersedes}}<p class="source">replaces {{range .Supersedes}}<code>{{.}}</code> {{end}}</p>{{end}}
 </article>
 {{end}}
 {{end}}

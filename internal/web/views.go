@@ -342,7 +342,8 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 		if want.Project != "" && p != want.Project {
 			continue
 		}
-		found, err := st.Entries(p, store.EntryFilter{})
+		// The log is the history view, so replaced entries stay, marked as such.
+		found, err := st.Entries(p, store.EntryFilter{IncludeSuperseded: true})
 		if err != nil {
 			continue
 		}

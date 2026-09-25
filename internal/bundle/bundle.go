@@ -450,6 +450,11 @@ func renderSection(out *strings.Builder, heading string, items []Marked, showKin
 		if e.Host != "" {
 			meta = append(meta, e.Host)
 		}
+		// The id is what supersedes takes, so an agent that spots a wrong
+		// entry here can replace it without hunting for the file.
+		if e.Path != "" {
+			meta = append(meta, "id "+e.ID())
+		}
 		fmt.Fprintf(out, "  <sub>%s</sub>\n", strings.Join(meta, " · "))
 
 		if m.Stale {

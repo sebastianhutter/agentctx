@@ -130,6 +130,12 @@ type Entry struct {
 	// stays readable afterwards.
 	Resolved bool `yaml:"resolved,omitempty"`
 
+	// Supersedes names entries this one replaces, by EntryID. The log is
+	// append-only, so a finding recorded wrongly — under the wrong repo name,
+	// or simply wrong — cannot be edited; it is replaced. The old file stays,
+	// and Entries stops returning it unless asked to.
+	Supersedes []string `yaml:"supersedes,omitempty"`
+
 	// Parent and RepoNote are links rendered from Task, Project and Repo when
 	// the entry is written. See PropParent. Never read back: the ids are what
 	// agentctx works from.
@@ -141,6 +147,39 @@ type Entry struct {
 
 	// Path is where this entry was read from. Not persisted.
 	Path string `yaml:"-"`
+
+	// SupersededBy is the id of the entry that replaced this one, filled in
+	// on read when EntryFilter.IncludeSuperseded asked for replaced entries.
+	// Derived, never stored: the replacement is a fact about the newer file.
+	SupersededBy string `yaml:"-"`
+}
+
+// ID is the entry's identifier: its file name without the extension. Unique
+// within a project, since the filename carries a timestamp and a random
+// suffix, and it is what Supersedes refers to.
+func (e Entry) ID() string {
+	return EntryID(e.Path)
+}
+
+// EntryID turns a path or file name into an entry id.
+func EntryID(path string) string {
+	base := path
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.TrimSuffix(base, ".md")
+}
+
+// Supersedable reports whether an entry of this kind can be replaced. Only
+// what an agent asserts can be wrong in a way worth replacing: opened and
+// closed record that something happened, and a dependency already has
+// resolved for changing its mind.
+func Supersedable(kind string) bool {
+	switch kind {
+	case KindFinding, KindDecision, KindNote:
+		return true
+	}
+	return false
 }
 
 // Time parses the entry's timestamp. A malformed one sorts first rather than

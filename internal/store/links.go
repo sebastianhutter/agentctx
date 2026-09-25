@@ -145,7 +145,8 @@ func (s *Store) Relink(dryRun bool) (*RelinkReport, error) {
 			}
 		}
 
-		entries, err := s.Entries(project, EntryFilter{})
+		// Replaced entries are still files in the vault, and still deserve links.
+		entries, err := s.Entries(project, EntryFilter{IncludeSuperseded: true})
 		if err != nil {
 			return nil, err
 		}

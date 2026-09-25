@@ -475,3 +475,27 @@ func TestGraphJSONWarningsAndWeights(t *testing.T) {
 		}
 	}
 }
+
+// Every page hides a replaced entry except the log, which is the history.
+func TestSupersededEntriesInTheLogOnly(t *testing.T) {
+	s, st := newTestServer(t)
+	old := &store.Entry{Kind: store.KindFinding, Project: "proj", Scope: store.ScopeRepo,
+		Repo: "acme/infrastructure", Body: "Wrong claim",
+		Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}}
+	if _, err := st.Append(old); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := st.Append(&store.Entry{Kind: store.KindFinding, Project: "proj", Scope: store.ScopeRepo,
+		Repo: "acme/infrastructure", Body: "Right claim", Supersedes: []string{old.ID()},
+		Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	log := get(t, s, "/log").Body.String()
+	if !strings.Contains(log, "Wrong claim") || !strings.Contains(log, "superseded by") {
+		t.Error("the log view should keep the replaced entry, marked")
+	}
+	if strings.Contains(get(t, s, "/project/proj/repo/acme/infrastructure").Body.String(), "Wrong claim") {
+		t.Error("the repo page still shows a replaced finding")
+	}
+}

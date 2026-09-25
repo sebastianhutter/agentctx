@@ -150,6 +150,11 @@ form.stack small { font-weight: 400; color: var(--muted); }
          border-radius: 8px; padding: .7rem 1rem; margin-bottom: 1rem; }
 .empty { text-align: center; color: var(--muted); padding: 2rem; }
 
+/* A replaced entry, shown only in the log view. */
+.entry.superseded { opacity: .55; }
+.entry.superseded .entry-body { text-decoration: line-through; text-decoration-color: var(--muted); }
+.replaced { color: var(--muted); font-size: .82rem; margin: .5rem 0 0; }
+
 /* Checks */
 ul.issues { list-style: none; padding: 0; margin: .4rem 0 0; }
 ul.issues li { padding: .5rem 0; border-bottom: 1px solid var(--line); font-size: .92rem; }

@@ -347,6 +347,12 @@ type EntryFilter struct {
 	Kinds  []string
 	Since  time.Time
 	Latest bool
+
+	// IncludeSuperseded returns entries another entry has replaced, with
+	// SupersededBy set. Off by default: a replaced finding is one nobody
+	// should act on, and every reader would otherwise have to remember to
+	// drop it. The log view and relink are the readers that want history.
+	IncludeSuperseded bool
 }
 
 // Entries returns a project's log entries, oldest first, matching the filter.
@@ -367,7 +373,7 @@ func (s *Store) Entries(project string, filter EntryFilter) ([]*Entry, error) {
 		return nil, fmt.Errorf("read log %s: %w", dir, err)
 	}
 
-	var out []*Entry
+	var all []*Entry
 	for _, de := range dirEntries {
 		if de.IsDir() || !strings.HasSuffix(de.Name(), ".md") || strings.HasPrefix(de.Name(), ".") {
 			continue
@@ -383,9 +389,28 @@ func (s *Store) Entries(project string, filter EntryFilter) ([]*Entry, error) {
 		}
 		entry.Body = strings.TrimSpace(body)
 		entry.Path = path
+		all = append(all, &entry)
+	}
 
-		if matches(&entry, filter) {
-			out = append(out, &entry)
+	// Supersession is read across the whole log before filtering: the entry
+	// replacing a task's finding may belong to another task, or to none.
+	replaced := map[string]string{}
+	for _, e := range all {
+		for _, old := range e.Supersedes {
+			replaced[EntryID(old)] = e.ID()
+		}
+	}
+
+	var out []*Entry
+	for _, e := range all {
+		if by, ok := replaced[e.ID()]; ok {
+			if !filter.IncludeSuperseded {
+				continue
+			}
+			e.SupersededBy = by
+		}
+		if matches(e, filter) {
+			out = append(out, e)
 		}
 	}
 

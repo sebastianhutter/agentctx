@@ -192,3 +192,27 @@ func TestCheckNothingLoggedAndBacklog(t *testing.T) {
 		t.Errorf("consolidation-backlog = %+v, want proj-2", got)
 	}
 }
+
+// A repo logged under the wrong name stops being reported once the entry is
+// replaced: the check reads the live log, not the history.
+func TestCheckIgnoresSupersededEntries(t *testing.T) {
+	s := healthFixture(t)
+	mustProject(t, s, &ProjectNote{ID: "proj", Name: "Example", Repos: []string{"acme/platform"}})
+	wrong := &Entry{Kind: KindFinding, Project: "proj", Scope: ScopeRepo, Repo: "platform",
+		Source: &Source{Kind: SourceInferred, Retrieved: "2026-09-19"}}
+	mustAppend(t, s, wrong)
+	if len(issuesWith(mustCheck(t, s), IssueRepoUnlisted)) == 0 {
+		t.Fatal("fixture: the bare repo name should be reported first")
+	}
+
+	mustAppend(t, s, &Entry{Kind: KindFinding, Project: "proj", Scope: ScopeRepo, Repo: "acme/platform",
+		Source:     &Source{Kind: SourceInferred, Retrieved: "2026-09-19"},
+		Supersedes: []string{wrong.ID()}})
+
+	issues := mustCheck(t, s)
+	for _, code := range []string{IssueRepoUnlisted, IssueRepoNearDuplicate} {
+		if got := issuesWith(issues, code); len(got) != 0 {
+			t.Errorf("%s still reported after the entry was replaced: %+v", code, got)
+		}
+	}
+}

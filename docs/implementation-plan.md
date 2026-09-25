@@ -45,9 +45,13 @@ already (Jira, GitLab, Kepler, `local-rag`).
 
 ### Deferred to v2, deliberately
 
-Desktop skill for consolidating · `Stop` and `PreCompact` hooks ·
-near-duplicate supersede (`replaces:`) · a derived SQLite index · any external
-interface, if D4 ever proves too austere.
+Desktop skill for consolidating · `Stop` and `PreCompact` hooks · a derived
+SQLite index · any external interface, if D4 ever proves too austere.
+
+(Explicit supersede, once on this list as `replaces:`, has since been built as
+`supersedes` — see `docs/vault-schema.md`. What prompted it was a finding filed
+under a bare repo name: the one kind of mistake the checks can see and nothing
+could repair. Automatic near-duplicate detection stays out.)
 
 ---
 
@@ -694,9 +698,11 @@ asks for it.
 ## 14. The web interface
 
 `internal/web`: projects, a project page, task pages, repository notes, a log
-view, and a form for creating a project. Served on `127.0.0.1:31125` by the menu
-bar app, or standalone with `agentctx web`. Go templates, one stylesheet, no
-JavaScript and no build step.
+view, a graph with a detail panel, the vault checks, and a form for creating a
+project. Served on `127.0.0.1:31125` by the menu bar app, or standalone with
+`agentctx web`. Go templates, one stylesheet, and no build step; the graph page
+is the one place with JavaScript, using Cytoscape.js vendored under
+`internal/web/static/vendor` so nothing is fetched from elsewhere.
 
 **Read-mostly, as the notes scoped it.** Obsidian edits notes better than a
 browser form will, and everything an agent writes goes through the verbs. Two
