@@ -39,6 +39,7 @@ type Server struct {
 	version    string
 	templates  map[string]*template.Template
 	errorPage  *template.Template
+	detail     *template.Template
 	http       *http.Server
 }
 
@@ -70,6 +71,10 @@ func New(configPath, version string) (*Server, error) {
 	}
 	s.errorPage = errorPage
 
+	if s.detail, err = parseDetail(); err != nil {
+		return nil, fmt.Errorf("parse detail panel: %w", err)
+	}
+
 	return s, nil
 }
 
@@ -85,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /log", s.handleLog)
 	mux.HandleFunc("GET /graph", s.handleGraph)
 	mux.HandleFunc("GET /graph.json", s.handleGraphJSON)
+	mux.HandleFunc("GET /graph/node", s.handleGraphNode)
 	mux.HandleFunc("GET /checks", s.handleChecks)
 	mux.HandleFunc("GET /new", s.handleNewProjectForm)
 	mux.HandleFunc("POST /new", s.handleNewProject)
