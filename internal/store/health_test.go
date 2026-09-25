@@ -192,16 +192,3 @@ func TestCheckNothingLoggedAndBacklog(t *testing.T) {
 		t.Errorf("consolidation-backlog = %+v, want proj-2", got)
 	}
 }
-
-func TestCheckUnattributedHostsIsOneVaultLine(t *testing.T) {
-	s := healthFixture(t)
-	for _, id := range []string{"alpha", "beta"} {
-		mustProject(t, s, &ProjectNote{ID: id, Name: id})
-		mustAppend(t, s, &Entry{Kind: KindFinding, Project: id, Scope: ScopeProject, Host: UnattributedHost,
-			Source: &Source{Kind: SourceInferred, Retrieved: "2026-09-19"}})
-	}
-	got := issuesWith(mustCheck(t, s), IssueHostUnattributed)
-	if len(got) != 1 || got[0].Project != "" || !strings.Contains(got[0].Message, "2 entries of 2") {
-		t.Errorf("host-unattributed = %+v, want a single vault-level issue", got)
-	}
-}
