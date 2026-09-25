@@ -46,6 +46,8 @@ source:                        # required on findings
 confidence: high               # derived from source.kind
 parent: '[[proj/tasks/proj-142|proj-142]]'   # see Links; the project note when there is no task
 repo_note: '[[proj/notes/acme-infrastructure|acme/infrastructure]]'  # when that note exists
+supersedes:                    # optional: ids of entries this one replaces
+    - 2026-09-18T0910-proj-142-finding-7c1e
 ---
 
 for_each over a provider-versioned map breaks on upgrade; the keys are recomputed
@@ -54,6 +56,32 @@ for_each over a provider-versioned map breaks on upgrade; the keys are recompute
 Filename: `<ts>-<task>-<kind>-<4 hex>.md`. The random suffix removes the
 same-second collision case for parallel hosts; a collision anyway is reported and
 retried, never resolved by overwriting.
+
+The entry's **id** is its file name without `.md`. Bundles print it under each
+entry (`id 2026-09-19T1432-proj-142-finding-a3f0`), since it is what
+`supersedes` takes.
+
+### Superseding an entry
+
+The log is append-only, so an entry that turns out wrong — a claim that no
+longer holds, or a finding filed under the wrong repo name or scope — is not
+edited. A new finding or decision names it in `supersedes`, and from then on:
+
+- the old entry is left out of everything an agent reads: bundles, `find`,
+  repo notes, the graph, the checks;
+- the old file is untouched, and the web log view still shows it, struck
+  through, with the id of its replacement.
+
+Which entries are replaced is derived on read from the `supersedes` lists,
+like dependencies — never stored on the old entry, which would mean editing
+it. Only findings, decisions and notes can be replaced; `opened` and `closed`
+record that something happened, and a dependency has `resolved`. The target
+must be in the same project and not already replaced, so there is always one
+live answer: to correct a correction, supersede the correction.
+
+A replaced entry may already be folded into a consolidated note body. The
+replacement is newer than `consolidated_through`, so it is returned beside the
+body until the next consolidation rewrites it.
 
 ### Scope
 

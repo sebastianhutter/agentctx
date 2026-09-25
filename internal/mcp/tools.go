@@ -240,6 +240,11 @@ var logDecisionTool = mcp.NewTool("log_decision",
 		mcp.Description("What was considered and dropped, each with the reason it lost.")),
 	mcp.WithArray("affected_repos", mcp.WithStringItems(),
 		mcp.Description("Repositories this decision changes.")),
+	mcp.WithArray("supersedes", mcp.WithStringItems(),
+		mcp.Description("Ids of entries this one replaces — the `id` shown under an entry in a bundle. "+
+			"Use it when something recorded earlier is wrong or was filed wrongly (wrong repo name, "+
+			"wrong scope): the log is append-only, so the old entry is not edited, but it stops being "+
+			"returned once replaced. Same project only.")),
 	mcp.WithString("task_id", mcp.Required(),
 		mcp.Description("Task id, as passed to open_task.")),
 )
@@ -270,11 +275,12 @@ func (h *handlers) logDecision(ctx context.Context, request mcp.CallToolRequest)
 		Rationale:            rationale,
 		AlternativesRejected: request.GetStringSlice("alternatives_rejected", nil),
 		AffectedRepos:        request.GetStringSlice("affected_repos", nil),
+		Supersedes:           request.GetStringSlice("supersedes", nil),
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Logged decision on %s.\n%s", entry.Task, entry.Path)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Logged decision on %s.%s\n%s", entry.Task, replaced(entry), entry.Path)), nil
 }
 
 // --- log_finding ---
@@ -319,6 +325,11 @@ var logFindingTool = mcp.NewTool("log_finding",
 		mcp.Description("Repository the finding is about. Required when scope=repo.")),
 	mcp.WithString("confidence", mcp.Enum(store.ConfidenceHigh, store.ConfidenceMedium, store.ConfidenceLow),
 		mcp.Description("Optional. Only honoured when lower than the level derived from source_kind.")),
+	mcp.WithArray("supersedes", mcp.WithStringItems(),
+		mcp.Description("Ids of entries this one replaces — the `id` shown under an entry in a bundle. "+
+			"Use it when something recorded earlier is wrong or was filed wrongly (wrong repo name, "+
+			"wrong scope): the log is append-only, so the old entry is not edited, but it stops being "+
+			"returned once replaced. Same project only.")),
 	mcp.WithString("target_id", mcp.Required(),
 		mcp.Description("Task id, or a project id when the finding is about the project as a whole.")),
 )
@@ -354,6 +365,7 @@ func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) 
 		Scope:      request.GetString("scope", ""),
 		Repo:       request.GetString("repo", ""),
 		Confidence: request.GetString("confidence", ""),
+		Supersedes: request.GetStringSlice("supersedes", nil),
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -363,8 +375,16 @@ func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) 
 	if target == "" {
 		target = entry.Project
 	}
-	return mcp.NewToolResultText(fmt.Sprintf("Logged %s-scoped finding on %s (confidence %s).\n%s",
-		entry.Scope, target, entry.Confidence, entry.Path)), nil
+	return mcp.NewToolResultText(fmt.Sprintf("Logged %s-scoped finding on %s (confidence %s).%s\n%s",
+		entry.Scope, target, entry.Confidence, replaced(entry), entry.Path)), nil
+}
+
+// replaced reports what an entry superseded, for the tool's reply.
+func replaced(e *store.Entry) string {
+	if len(e.Supersedes) == 0 {
+		return ""
+	}
+	return " Replaces " + strings.Join(e.Supersedes, ", ") + ", which is no longer returned."
 }
 
 // --- log_dependency ---

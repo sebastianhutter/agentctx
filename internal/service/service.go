@@ -434,6 +434,8 @@ type LogDecisionRequest struct {
 	Rationale            string
 	AlternativesRejected []string
 	AffectedRepos        []string
+	// Supersedes names entries this decision replaces. See Entry.Supersedes.
+	Supersedes []string
 }
 
 // LogDecision appends a decision entry.
@@ -467,6 +469,9 @@ func (s *Service) LogDecision(req LogDecisionRequest) (*store.Entry, error) {
 		Kind: store.KindDecision, Task: taskID, Project: project, Scope: store.ScopeTask,
 		Host: s.host(), Session: s.session(), Body: body.String(),
 	}
+	if entry.Supersedes, err = s.checkSupersedes(project, req.Supersedes); err != nil {
+		return nil, err
+	}
 	if _, err := s.Store.Append(entry); err != nil {
 		return nil, err
 	}
@@ -483,6 +488,8 @@ type LogFindingRequest struct {
 	Scope      string
 	Repo       string
 	Confidence string
+	// Supersedes names entries this finding replaces. See Entry.Supersedes.
+	Supersedes []string
 }
 
 // LogFinding appends a finding entry against a task or a project.
@@ -544,10 +551,67 @@ func (s *Service) LogFinding(req LogFindingRequest) (*store.Entry, error) {
 		}
 	}
 
+	var err error
+	if entry.Supersedes, err = s.checkSupersedes(entry.Project, req.Supersedes); err != nil {
+		return nil, err
+	}
 	if _, err := s.Store.Append(entry); err != nil {
 		return nil, err
 	}
 	return entry, nil
+}
+
+// checkSupersedes validates the entries a new one claims to replace and
+// returns them as ids.
+//
+// Refused rather than recorded loosely, because a supersedes that names
+// nothing hides nothing and the wrong entry stays in every bundle, while one
+// that names the wrong entry silently hides a good one. Each must exist in the
+// same project, be something an agent asserted, and not be replaced already:
+// replacing a replaced entry would leave two live answers, so the caller is
+// pointed at the current one instead.
+func (s *Service) checkSupersedes(project string, refs []string) ([]string, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	entries, err := s.Store.Entries(project, store.EntryFilter{IncludeSuperseded: true})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*store.Entry, len(entries))
+	for _, e := range entries {
+		byID[e.ID()] = e
+	}
+
+	var ids []string
+	for _, ref := range refs {
+		id := store.EntryID(strings.TrimSpace(ref))
+		if id == "" {
+			continue
+		}
+		old, ok := byID[id]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("supersedes %q: no such entry in project %s — pass the id shown under the entry "+
+				"in a bundle, or the file name log_finding returned", ref, project)
+		case !store.Supersedable(old.Kind):
+			return nil, fmt.Errorf("supersedes %q: a %s entry records that something happened and cannot be replaced; "+
+				"only findings, decisions and notes can", ref, old.Kind)
+		case old.SupersededBy != "":
+			return nil, fmt.Errorf("supersedes %q: already replaced by %s — supersede that one instead", ref, old.SupersededBy)
+		}
+		ids = appendOnce(ids, id)
+	}
+	return ids, nil
+}
+
+func appendOnce(list []string, v string) []string {
+	for _, have := range list {
+		if have == v {
+			return list
+		}
+	}
+	return append(list, v)
 }
 
 // --- log_dependency ---

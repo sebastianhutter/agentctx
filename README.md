@@ -71,6 +71,7 @@ agentctx open-task proj-142 --title "Rework the network module" \
 | `open_task` | What do we know about this task, its project and its repos? Creates the task note from a seed |
 | `log_decision` | A choice and why it was made. Rationale required |
 | `log_finding` | Something looked up and confirmed. Source required, scope chosen deliberately |
+| | Both log verbs take `supersedes`: the ids of earlier entries this one replaces. The old file stays; agents stop seeing it |
 | `log_dependency` | This task waits for those. Refuses loops and unknown ids |
 | `consolidate` | Folds logged entries into a note body — the only verb that rewrites anything |
 | `close_task` | Closes with a summary — and refuses if nothing was logged |
