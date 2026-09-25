@@ -29,17 +29,12 @@ const (
 	IssueDependencyUnknown = "dependency-unknown"
 	IssueTaskNothingLogged = "task-nothing-logged"
 	IssueBacklog           = "consolidation-backlog"
-	IssueHostUnattributed  = "host-unattributed"
 )
 
 // BacklogThreshold is how many unconsolidated entries a note may carry before
 // it is reported. Skipping consolidation never loses a fact, so this is about
 // how much an agent has to read, not about correctness.
 const BacklogThreshold = 15
-
-// UnattributedHost is what an entry is stamped with when an SSE client did not
-// say who it was.
-const UnattributedHost = "sse-client"
 
 // Issue is one thing in the vault that is not wrong enough to refuse, but
 // quietly makes the knowledge in it harder to find.
@@ -107,7 +102,6 @@ func (s *Store) Check() ([]Issue, error) {
 	issues = append(issues, checkKeyClaims(projects)...)
 	issues = append(issues, checkUnmappedKeys(projects)...)
 	issues = append(issues, checkRepoNames(projects)...)
-	issues = append(issues, checkHosts(projects)...)
 
 	sort.SliceStable(issues, func(i, j int) bool {
 		if issues[i].Severity != issues[j].Severity {
@@ -368,31 +362,6 @@ func checkUnmappedKeys(projects []*projectData) []Issue {
 		}
 	}
 	return issues
-}
-
-// checkHosts reports entries nobody can attribute. The host is how the log
-// answers "which agents actually write here"; an SSE client that skipped
-// announcing its name at initialize leaves that blank. One line for the vault,
-// since the cause is a client, not a project.
-func checkHosts(projects []*projectData) []Issue {
-	anonymous, total := 0, 0
-	for _, p := range projects {
-		for _, e := range p.entries {
-			total++
-			if e.Host == UnattributedHost || e.Host == "" {
-				anonymous++
-			}
-		}
-	}
-	if anonymous == 0 {
-		return nil
-	}
-	return []Issue{{
-		Severity: SeverityInfo, Code: IssueHostUnattributed,
-		Message: fmt.Sprintf("%s of %d were written by an SSE client that did not announce its name",
-			plural(anonymous, "entry"), total),
-		Fix: "nothing to repair in the vault; the log view's host filter shows which sessions they came from",
-	}}
 }
 
 // checkRepoNames reports a repo recorded under a bare name when a qualified
