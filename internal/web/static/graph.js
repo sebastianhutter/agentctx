@@ -184,6 +184,7 @@
       const flip = !clusters && FLIP.has(e.rel);
       els.push({
         group: "edges",
+        selectable: false,
         classes: flip ? "flipped" : "",
         data: {
           id: `${e.rel}:${e.source}>${e.target}`, rel: e.rel, weight: e.weight,
@@ -341,6 +342,8 @@
   // Cytoscape has no double-tap event; two taps on one target inside 350 ms are one.
   let lastTap = { id: null, t: 0 };
   cy.on("tap", (ev) => {
+    // An edge has no detail of its own; a tap on one is neither a node nor the background.
+    if (ev.target !== cy && ev.target.isEdge()) return;
     const id = ev.target === cy ? "bg" : ev.target.id();
     const now = Date.now();
     const double = lastTap.id === id && now - lastTap.t < 350;
