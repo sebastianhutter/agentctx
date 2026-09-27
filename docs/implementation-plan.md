@@ -399,18 +399,15 @@ Still open:
   decide, so it waits for the trial.
 - **Retention** for closed tasks — leave everything and let retrieval sort it out,
   or compact? A non-problem until it is one.
-- **Does the second task cost less?** It is the design's central claim and
-  nothing measures it. Asking the agent to estimate its tokens at `close_task`
-  would give a number no agent can see, and a task spans sessions no single
-  agent sees whole — a guess, which D9 already says not to trust. If it is
-  measured, it is measured: the host's own transcripts carry exact usage, a
-  `SessionEnd` hook could pass it to the CLI as one entry per session, and the
-  total is folded on read. agentctx can also count its own share exactly — the
-  size of every bundle it returns.
 - **Write-back to the tracker** — under D4, agentctx cannot. If a Jira comment
   summarising a decision is ever wanted, the agent does it with its own Jira MCP.
   Probably the right split; worth revisiting only if it is missed.
 Resolved after the first draft:
+
+- **Measuring token cost per task** — not doing it. Asked of the agent, it is a
+  number no agent can see, over sessions no single agent sees whole. Measured
+  from the host's transcripts, it needs a hook and a new entry kind, and the
+  added value does not pay for that complexity.
 
 - **Repository visibility** — private now, possibly public later. Because git
   history is permanent, the no-names rule applies from the first commit rather than
