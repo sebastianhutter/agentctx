@@ -752,3 +752,96 @@ folder containing everything you know.
 - **`[[proj-210]]` rendered as literal brackets.** The vault's own link syntax,
   which markdown does not know; it now resolves through `/t/<id>`, which finds
   the task's project so a note body does not have to carry one.
+
+
+---
+
+## 15. Repository findings across projects
+
+A repository-scoped finding is "true about a repository, for whoever works on it
+next" — but until now *whoever* meant whoever works on it next **in the same
+project**. `open_task` and `open_project` read repo findings from the task's own
+project folder only, so a second project working in `acme/platform` started
+from nothing, however much the first had learned there.
+
+That turned out to be the common case, not an edge. An audit of a real vault
+after a week of use: 12 projects, 21 repositories with repo-scoped findings, and
+8 of those repositories had findings in two or three projects — about 70
+entries. Read one by one, none was misfiled. Projects are mostly workstreams (a
+migration, a feature) over repositories the organisation owns, so several of
+them touching one repository is what normal work looks like. The cost was
+visible too: one fact logged twice in two projects, three minutes apart, and
+four repositories with a consolidated note in each of two projects, each folding
+half of what is known.
+
+**Reads widen; writes do not move.** An entry is still appended to the project
+whose task wrote it — append-only, one file per writer, nothing relocated. The
+bundles additionally collect repo-scoped findings about the same repositories
+from every other project, the same fold-on-read idea as amendments. The
+repository id is what makes this safe: `acme/platform` names one repository
+wherever it is logged. That is the property to check before doing the same for
+anything else (§16).
+
+**Shown apart, with where they came from.** Findings from elsewhere come under
+their own heading, "What other projects know about `acme/platform`", each
+marked with the project it was read from. Two reasons found in the audit, not
+invented:
+
+- Many repo findings are pinned to a moment the writing project shared — "on
+  main@abc1234", "not merged yet, branch X". The reader needs to know whose
+  moment that was.
+- Some are written from the project's point of view: "reference repository,
+  never modified by this project". Read from another project, *this project*
+  means something else.
+
+**Superseding one is done where it lives.** `supersedes` stays within a
+project. A wrong finding from elsewhere is replaced with `log_finding` targeting
+*that* project — a finding may target a project, which is exactly this case.
+
+**Consolidation is unchanged, deliberately.** Each project's `notes/` page
+still folds that project's entries only. A shared page per repository outside
+the project folders is the cleaner end state, but it changes the vault layout
+and the one-parent link scheme, and it is not yet clear the split pages hurt
+once the bundles show both halves. Decided after this has been used, not before.
+
+**Not bounded yet.** A repository with many findings elsewhere makes a long
+bundle. The first repository in the audit had eighteen. If that proves too
+much, the cut is by date, newest first, with a count of what was left out —
+never silently.
+
+
+---
+
+## 16. More subjects than repositories
+
+Asked while designing §15: should findings attach to more than repositories —
+an **environment** (the staging and production accounts), a **service** (a SaaS
+dependency, or a self-hosted one), **documentation** (a wiki page, a vault note)?
+
+The test a new kind has to pass is the one repositories pass:
+
+1. Durable findings are *about* it, not merely mentioning it.
+2. An agent can name it by an id without guessing.
+3. Something tells `open_task` it is relevant — a task's `repos` do that for
+   repositories.
+
+- **Environment — yes.** In the same audit, roughly a third of the durable
+  findings mention staging or production; they are filed under the nearest
+  scope that exists. What is recorded is what was *learned* about an
+  environment, never an inventory of it: live state is what `status` was, and
+  under D4 nothing is fetched. The id is **not** global — every project has a
+  `prod` — so an environment stays project-local.
+- **Service — yes.** A SaaS name is global and would read across projects like
+  a repository; a self-hosted instance belongs to one project. Which of the two
+  a service is has to be part of its id.
+- **Documentation — no.** A wiki page is not what a finding is about but where
+  it came from, which is `source{kind, ref}`. As a kind of its own it turns this
+  into a link collection, and the vault is already indexed by a retrieval tool
+  that reads those pages.
+
+The shape, when it is built: one mechanism, not one per kind. `repo` becomes one
+case of a *subject* with a kind and an id, each kind declaring whether its id is
+global (read across projects, as in §15) or project-local. The open question is
+the third test: nothing hands a task its environments the way a workspace hands
+it repositories. Either the project declares them through `amend`, or they are
+folded out of what the task has already logged.
