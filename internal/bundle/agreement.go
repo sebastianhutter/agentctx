@@ -27,12 +27,17 @@ no claim at all — it looks like knowledge.
 
 - ` + "`scope: repo`" + ` — true about a repository, whoever works on it next.
   *"This module's for_each breaks on a provider upgrade."*
+- ` + "`scope: environment`" + ` — true about an account or stage, named owner/name.
+  *"acme/production denies public S3 buckets by SCP."*
+- ` + "`scope: service`" + ` — true about a service the work depends on.
+  *"Token introspection is rate-limited to 50 requests per second."*
 - ` + "`scope: project`" + ` — true about the project as a whole.
   *"There is no staging environment."*
 - ` + "`scope: task`" + ` — true only of this piece of work.
   *"We picked option B here."*
 
-Repo and project scope is what outlives the task and makes the next one cheaper.
+Every scope but task outlives the task and makes the next one cheaper, and repo,
+environment and service findings reach other projects working with the same one.
 If a finding would help someone who has never heard of this task, it is not
 task-scoped. When in doubt, prefer the wider scope.
 

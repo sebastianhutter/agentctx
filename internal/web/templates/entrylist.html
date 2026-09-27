@@ -5,7 +5,7 @@
   <div class="entry-head">
     <span class="pill {{kindClass .Kind}}">{{.Kind}}</span>
     {{if .Task}}<code>{{.Task}}</code>{{end}}
-    <span class="pill scope">{{.Scope}}{{if .Repo}} · {{.Repo}}{{end}}</span>
+    <span class="pill scope">{{.Scope}}{{if .Repo}} · {{.Repo}}{{end}}{{if .Environment}} · {{.Environment}}{{end}}{{if .Service}} · {{.Service}}{{end}}</span>
     {{if .Confidence}}<span class="pill conf-{{.Confidence}}">{{.Confidence}}</span>{{end}}
     <span class="muted right">{{.TS}} {{if .Age}}· {{.Age}}{{end}} {{if .Host}}· {{.Host}}{{end}}</span>
   </div>

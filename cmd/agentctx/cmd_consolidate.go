@@ -13,6 +13,8 @@ import (
 var (
 	consolidateTarget string
 	consolidateRepo   string
+	consolidateEnv    string
+	consolidateSvc    string
 	consolidateFile   string
 	consolidateExpect string
 )
@@ -25,8 +27,8 @@ var consolidateCmd = &cobra.Command{
 The body is read from --file, or from standard input. This is the only command
 that rewrites anything; everything else appends.
 
-Targets: a task id, a project id, or a project id with --repo for that
-repository's page under notes/.`,
+Targets: a task id, a project id, or a project id with --repo, --environment or
+--service for that subject's page under notes/.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		svc, err := newService()
@@ -50,9 +52,11 @@ repository's page under notes/.`,
 		}
 
 		req := service.ConsolidateRequest{
-			TargetID: target,
-			Repo:     consolidateRepo,
-			Body:     string(body),
+			TargetID:    target,
+			Repo:        consolidateRepo,
+			Environment: consolidateEnv,
+			Service:     consolidateSvc,
+			Body:        string(body),
 		}
 		if cmd.Flags().Changed("expect-through") {
 			req.ExpectThrough, req.Checked = consolidateExpect, true
@@ -70,6 +74,8 @@ repository's page under notes/.`,
 func init() {
 	consolidateCmd.Flags().StringVar(&consolidateTarget, "target", "", "Task or project id")
 	consolidateCmd.Flags().StringVar(&consolidateRepo, "repo", "", "Fold this repository's findings instead")
+	consolidateCmd.Flags().StringVar(&consolidateEnv, "environment", "", "Fold this environment's findings instead")
+	consolidateCmd.Flags().StringVar(&consolidateSvc, "service", "", "Fold this service's findings instead")
 	consolidateCmd.Flags().StringVar(&consolidateFile, "file", "", "Read the body from this file (default: stdin)")
 	consolidateCmd.Flags().StringVar(&consolidateExpect, "expect-through", "", "Refuse if consolidated_through has moved")
 

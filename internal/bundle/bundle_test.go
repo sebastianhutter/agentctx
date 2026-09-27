@@ -221,6 +221,8 @@ func rewrite(t *testing.T, s *store.Store, note *store.TaskNote) {
 	}
 }
 
+var infra = store.Subject{Kind: store.ScopeRepo, ID: "acme/infrastructure"}
+
 func TestRepoFindingsFromOtherProjects(t *testing.T) {
 	s, a := setup(t)
 	if err := s.CreateProject(&store.ProjectNote{
@@ -260,7 +262,7 @@ func TestRepoFindingsFromOtherProjects(t *testing.T) {
 	if got := b.RepoFindings["acme/infrastructure"]; len(got) != 1 || got[0].From != "" {
 		t.Errorf("own repo findings = %v, want the one own entry, unmarked", got)
 	}
-	got := b.ElsewhereFindings["acme/infrastructure"]
+	got := b.ElsewhereFindings[infra]
 	if len(got) != 2 {
 		t.Fatalf("findings from elsewhere = %d, want 2 (the replaced one dropped)", len(got))
 	}
@@ -293,7 +295,7 @@ func TestRepoFindingsFromOtherProjects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Project: %v", err)
 	}
-	if len(pb.ElsewhereNotes["acme/infrastructure"]) != 2 {
+	if len(pb.ElsewhereNotes[infra]) != 2 {
 		t.Errorf("project bundle elsewhere = %v, want 2 for acme/infrastructure", pb.ElsewhereNotes)
 	}
 	if !strings.Contains(pb.Render(), "What other projects know about acme/infrastructure") {

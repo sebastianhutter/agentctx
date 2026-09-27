@@ -3,8 +3,9 @@
 // Read-mostly on purpose. Obsidian edits notes better than a browser form ever
 // will, and everything an agent writes goes through the verbs — so what this
 // offers is what neither does well: a log view with cross-cutting filters, a
-// graph of how projects, tasks and repositories connect, the vault checks, and
-// creating a project without going through a chat.
+// graph of how projects, tasks and the repositories, environments and services
+// they work on connect, the vault checks, and creating a project without going
+// through a chat.
 package web
 
 import (
@@ -28,7 +29,7 @@ import (
 var assets embed.FS
 
 // pages are the page templates, each parsed into its own set.
-var pages = []string{"index.html", "project.html", "task.html", "repo.html", "log.html", "new.html", "graph.html", "checks.html"}
+var pages = []string{"index.html", "project.html", "task.html", "repo.html", "subject.html", "log.html", "new.html", "graph.html", "checks.html"}
 
 // shared are parsed into every page's set.
 var shared = []string{"templates/layout.html", "templates/entrylist.html", "templates/issuelist.html"}
@@ -86,6 +87,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /project/{project}", s.handleProject)
 	mux.HandleFunc("GET /project/{project}/task/{task}", s.handleTask)
 	mux.HandleFunc("GET /project/{project}/repo/{repo...}", s.handleRepoNote)
+	mux.HandleFunc("GET /project/{project}/environment/{id...}", s.handleSubjectNote(store.ScopeEnvironment))
+	mux.HandleFunc("GET /project/{project}/service/{id...}", s.handleSubjectNote(store.ScopeService))
 	mux.HandleFunc("GET /t/{task}", s.handleTaskRedirect)
 	mux.HandleFunc("GET /log", s.handleLog)
 	mux.HandleFunc("GET /graph", s.handleGraph)

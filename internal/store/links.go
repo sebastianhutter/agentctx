@@ -30,6 +30,11 @@ const (
 	// PropRepoNote points a repo-scoped entry at the note its findings are
 	// folded into.
 	PropRepoNote = "repo_note"
+
+	// PropSubjectNote points an environment- or service-scoped entry at the
+	// page its findings are folded into. Its own property rather than
+	// repo_note, so a query over repo_note still means repositories.
+	PropSubjectNote = "subject_note"
 )
 
 // noteLink renders a link to a file in the vault.
@@ -72,13 +77,18 @@ func (s *Store) RepoNoteLink(project, repo string) string {
 	return s.noteLink(s.RepoNotePath(project, repo), repo)
 }
 
+// SubjectNoteLink returns a link to an environment's or a service's page.
+func (s *Store) SubjectNoteLink(project string, sub Subject) string {
+	return s.noteLink(s.SubjectNotePath(project, sub), sub.ID)
+}
+
 // entryLinks works out the link properties an entry should carry.
 //
 // Only files that exist are linked. A dangling link in Obsidian is one click
 // from creating an empty file at that path, and an empty file where a repo note
 // belongs is one consolidation cannot read. A repo note that appears later is
 // picked up by Relink.
-func (s *Store) entryLinks(e *Entry) (parent, repoNote string) {
+func (s *Store) entryLinks(e *Entry) (parent, repoNote, subjectNote string) {
 	if e.Task != "" && vault.Exists(s.TaskPath(e.Project, e.Task)) {
 		parent = s.TaskLink(e.Project, e.Task)
 	} else if vault.Exists(s.ProjectPath(e.Project)) {
@@ -87,7 +97,10 @@ func (s *Store) entryLinks(e *Entry) (parent, repoNote string) {
 	if e.Repo != "" && vault.Exists(s.RepoNotePath(e.Project, e.Repo)) {
 		repoNote = s.RepoNoteLink(e.Project, e.Repo)
 	}
-	return parent, repoNote
+	if sub, ok := e.Subject(); ok && sub.Kind != ScopeRepo && s.SubjectNoteExists(e.Project, sub) {
+		subjectNote = s.SubjectNoteLink(e.Project, sub)
+	}
+	return parent, repoNote, subjectNote
 }
 
 // RelinkReport says what Relink changed, or would change.
@@ -105,8 +118,8 @@ type RelinkReport struct {
 // frontmatter is edited as text rather than re-rendered, so fields a human
 // added in Obsidian and the existing key order survive.
 //
-// Idempotent: a second run changes nothing, except to add a repo_note link to
-// an entry whose repo note has appeared since.
+// Idempotent: a second run changes nothing, except to add a repo_note or
+// subject_note link to an entry whose page has appeared since.
 func (s *Store) Relink(dryRun bool) (*RelinkReport, error) {
 	projects, err := s.ListProjects()
 	if err != nil {
@@ -145,19 +158,40 @@ func (s *Store) Relink(dryRun bool) (*RelinkReport, error) {
 			}
 		}
 
+		for _, kind := range []string{ScopeEnvironment, ScopeService} {
+			pages, err := filepath.Glob(filepath.Join(s.NotesDir(project), subjectDirs[kind], "*.md"))
+			if err != nil {
+				return nil, err
+			}
+			for _, path := range pages {
+				var note SubjectNote
+				if _, err := vault.ReadInto(path, &note); err != nil || note.Kind == "" {
+					continue
+				}
+				if err := s.relinkFile(report, path, dryRun, func(doc []byte) ([]byte, error) {
+					return setProperties(doc, []property{{PropParent, projectLink}})
+				}); err != nil {
+					return nil, err
+				}
+			}
+		}
+
 		// Replaced entries are still files in the vault, and still deserve links.
 		entries, err := s.Entries(project, EntryFilter{IncludeSuperseded: true})
 		if err != nil {
 			return nil, err
 		}
 		for _, e := range entries {
-			parent, repoNote := s.entryLinks(e)
+			parent, repoNote, subjectNote := s.entryLinks(e)
 			var props []property
 			if parent != "" {
 				props = append(props, property{PropParent, parent})
 			}
 			if repoNote != "" {
 				props = append(props, property{PropRepoNote, repoNote})
+			}
+			if subjectNote != "" {
+				props = append(props, property{PropSubjectNote, subjectNote})
 			}
 			if err := s.relinkFile(report, e.Path, dryRun, func(doc []byte) ([]byte, error) {
 				out, err := setProperties(doc, props)

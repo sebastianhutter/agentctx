@@ -499,3 +499,182 @@ func TestSupersededEntriesInTheLogOnly(t *testing.T) {
 		t.Error("the repo page still shows a replaced finding")
 	}
 }
+
+// addSubjects gives the fixture a second project sharing an environment with
+// the first, and a service only mentioned by an entry.
+func addSubjects(t *testing.T, st *store.Store) {
+	t.Helper()
+	if err := st.CreateProject(&store.ProjectNote{
+		ID: "other", Name: "Other", Environments: []string{"acme/production"},
+	}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if err := st.CreateProject(&store.ProjectNote{
+		ID: "third", Name: "Third", Environments: []string{"acme/staging"},
+	}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	for _, e := range []*store.Entry{
+		{Kind: store.KindFinding, Task: "proj-142", Project: "proj", Scope: store.ScopeEnvironment,
+			Environment: "acme/production", Body: "Production runs two node pools",
+			Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}},
+		{Kind: store.KindFinding, Project: "other", Scope: store.ScopeEnvironment,
+			Environment: "acme/production", Body: "Production has no NAT gateway",
+			Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}},
+		{Kind: store.KindFinding, Task: "proj-142", Project: "proj", Scope: store.ScopeService,
+			Service: "idp", Body: "Tokens expire after an hour",
+			Source: &store.Source{Kind: store.SourceInferred, Retrieved: "2026-09-19"}},
+	} {
+		if _, err := st.Append(e); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+}
+
+// Environments and services join projects the way repos do.
+func TestGraphJSONSubjects(t *testing.T) {
+	s, st := newTestServer(t)
+	addSubjects(t, st)
+	data := graphJSON(t, s, "/graph.json")
+
+	for _, want := range []struct{ source, target, rel string }{
+		{"project:other", "environment:acme/production", relOwns},
+		{"project:proj", "environment:acme/production", relUses},
+		{"task:proj/proj-142", "environment:acme/production", relTouch},
+		{"project:proj", "service:idp", relUses},
+		{"task:proj/proj-142", "service:idp", relTouch},
+		{"project:third", "environment:acme/staging", relOwns},
+	} {
+		if !hasEdge(data, want.source, want.target, want.rel) {
+			t.Errorf("missing edge %s -%s-> %s", want.source, want.rel, want.target)
+		}
+	}
+
+	env := nodeByID(data, "environment:acme/production")
+	if env == nil || env.Kind != nodeEnvironment || env.State != "shared-unconsolidated" ||
+		env.Detail != "other, proj" || env.Weight != 2 {
+		t.Errorf("shared environment node = %+v", env)
+	}
+	if env != nil && env.URL != "/log?environment="+url.QueryEscape("acme/production") {
+		t.Errorf("environment URL = %q", env.URL)
+	}
+	if n := nodeByID(data, "environment:acme/staging"); n == nil || n.State != "unconsolidated" || n.Weight != 0 {
+		t.Errorf("listed, unwritten environment node = %+v", n)
+	}
+	svc := nodeByID(data, "service:idp")
+	if svc == nil || svc.Kind != nodeService || svc.Detail != "proj" || svc.Weight != 1 {
+		t.Errorf("service node = %+v", svc)
+	}
+
+	var about int
+	for _, e := range data.Edges {
+		if e.Rel == relAbout && (e.Target == "environment:acme/production" || e.Target == "service:idp") {
+			about++
+		}
+	}
+	if about != 3 {
+		t.Errorf("about edges to subjects = %d, want 3", about)
+	}
+}
+
+func TestGraphNodeSubjectDetail(t *testing.T) {
+	s, st := newTestServer(t)
+	addSubjects(t, st)
+
+	for _, tc := range []struct{ query, want string }{
+		{"kind=environment&environment=" + url.QueryEscape("acme/production"), "Production has no NAT gateway"},
+		{"kind=environment&environment=" + url.QueryEscape("acme/production"), `data-node="project:other"`},
+		{"kind=environment&environment=" + url.QueryEscape("acme/production"), "2 environment-scoped findings across 2 projects"},
+		{"kind=service&service=idp", "Tokens expire after an hour"},
+		// Listed but not yet written about still has a row.
+		{"kind=environment&environment=" + url.QueryEscape("acme/staging"), `data-node="project:third"`},
+	} {
+		rec := get(t, s, "/graph/node?"+tc.query)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s = %d: %s", tc.query, rec.Code, rec.Body.String())
+			continue
+		}
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s does not contain %q", tc.query, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		query string
+		code  int
+	}{
+		{"kind=environment&environment=" + url.QueryEscape("../../etc/passwd"), http.StatusBadRequest},
+		{"kind=service&service=" + url.QueryEscape("../etc"), http.StatusBadRequest},
+		// An environment without its owner would join every production.
+		{"kind=environment&environment=production", http.StatusBadRequest},
+		{"kind=environment&environment=", http.StatusBadRequest},
+		{"kind=service&service=nothing", http.StatusNotFound},
+	} {
+		if rec := get(t, s, "/graph/node?"+tc.query); rec.Code != tc.code {
+			t.Errorf("%s = %d, want %d", tc.query, rec.Code, tc.code)
+		}
+	}
+}
+
+func TestLogFiltersBySubject(t *testing.T) {
+	s, st := newTestServer(t)
+	addSubjects(t, st)
+
+	env := get(t, s, "/log?environment="+url.QueryEscape("acme/production")).Body.String()
+	if !strings.Contains(env, "two node pools") || !strings.Contains(env, "no NAT gateway") {
+		t.Error("the environment filter lost an entry about the environment")
+	}
+	if strings.Contains(env, "Tokens expire") || strings.Contains(env, "Chose B") {
+		t.Error("the environment filter kept entries about something else")
+	}
+	// The graph folds case, so the link it makes must too.
+	if !strings.Contains(get(t, s, "/log?environment="+url.QueryEscape("ACME/Production")).Body.String(), "no NAT gateway") {
+		t.Error("the environment filter is case-sensitive")
+	}
+
+	svc := get(t, s, "/log?service=idp").Body.String()
+	if !strings.Contains(svc, "Tokens expire") || strings.Contains(svc, "no NAT gateway") {
+		t.Error("the service filter is wrong")
+	}
+	if !strings.Contains(svc, `value="environment"`) {
+		t.Error("the scope facet lost its other options once a service was chosen")
+	}
+}
+
+func TestProjectPageListsSubjects(t *testing.T) {
+	s, st := newTestServer(t)
+	addSubjects(t, st)
+
+	page := get(t, s, "/project/proj").Body.String()
+	for _, want := range []string{
+		"Environments", `href="/project/proj/environment/acme/production"`,
+		"Services", `href="/project/proj/service/idp"`,
+		"Repositories", `href="/project/proj/repo/acme/infrastructure"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the project page is missing %q", want)
+		}
+	}
+	if other := get(t, s, "/project/third").Body.String(); !strings.Contains(other, "acme/staging") ||
+		!strings.Contains(other, "nothing recorded yet") {
+		t.Error("a listed environment with no findings is missing from its project page")
+	}
+
+	rec := get(t, s, "/project/proj/environment/acme/production")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "two node pools") {
+		t.Errorf("environment page = %d", rec.Code)
+	}
+	if rec := get(t, s, "/project/proj/service/idp"); rec.Code != http.StatusOK ||
+		!strings.Contains(rec.Body.String(), "Tokens expire") {
+		t.Errorf("service page = %d", rec.Code)
+	}
+	for _, path := range []string{
+		"/project/proj/environment/" + url.PathEscape("../../etc/passwd"),
+		"/project/proj/environment/production",
+		"/project/" + url.PathEscape("../etc") + "/service/idp",
+	} {
+		if rec := get(t, s, path); rec.Code == http.StatusOK || strings.Contains(rec.Body.String(), "root:") {
+			t.Errorf("GET %s = %d, want a refusal", path, rec.Code)
+		}
+	}
+}

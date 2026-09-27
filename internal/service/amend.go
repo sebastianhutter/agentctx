@@ -10,15 +10,21 @@ import (
 
 // --- amend_project ---
 
-// AmendProjectRequest adds or removes repositories and tracker keys on an
-// existing project.
+// AmendProjectRequest adds or removes repositories, tracker keys,
+// environments and services on an existing project.
 type AmendProjectRequest struct {
 	ProjectID   string
 	AddRepos    []string
 	RemoveRepos []string
 	AddKeys     []string
 	RemoveKeys  []string
-	Reason      string
+
+	AddEnvironments    []string
+	RemoveEnvironments []string
+	AddServices        []string
+	RemoveServices     []string
+
+	Reason string
 }
 
 // AmendProject records a change to a project's repos or tracker keys.
@@ -97,7 +103,37 @@ func (s *Service) AmendProject(req AmendProjectRequest) (*store.Entry, error) {
 		entry.RemoveKeys = append(entry.RemoveKeys, key)
 	}
 
-	if len(entry.AddRepos)+len(entry.RemoveRepos)+len(entry.AddKeys)+len(entry.RemoveKeys) == 0 {
+	// Environments and services cost what a repo costs to get wrong: a wrong
+	// one adds findings to a bundle, and another amendment takes it away.
+	for _, sub := range []struct {
+		kind           string
+		have           []string
+		add, remove    []string
+		added, removed *[]string
+	}{
+		{store.ScopeEnvironment, note.Environments, req.AddEnvironments, req.RemoveEnvironments,
+			&entry.AddEnvironments, &entry.RemoveEnvironments},
+		{store.ScopeService, note.Services, req.AddServices, req.RemoveServices,
+			&entry.AddServices, &entry.RemoveServices},
+	} {
+		for _, v := range clean(sub.add) {
+			if err := store.ValidateSubject(sub.kind, v); err != nil {
+				return nil, err
+			}
+			if !containsFold(sub.have, v) {
+				*sub.added = append(*sub.added, v)
+			}
+		}
+		for _, v := range clean(sub.remove) {
+			if !containsFold(sub.have, v) {
+				return nil, fmt.Errorf("%s %q is not one of project %s's (%s)", sub.kind, v, id, strings.Join(sub.have, ", "))
+			}
+			*sub.removed = append(*sub.removed, v)
+		}
+	}
+
+	if len(entry.AddRepos)+len(entry.RemoveRepos)+len(entry.AddKeys)+len(entry.RemoveKeys)+
+		len(entry.AddEnvironments)+len(entry.RemoveEnvironments)+len(entry.AddServices)+len(entry.RemoveServices) == 0 {
 		return nil, fmt.Errorf("nothing to change: project %s already has what was asked", id)
 	}
 
@@ -110,6 +146,8 @@ func (s *Service) AmendProject(req AmendProjectRequest) (*store.Entry, error) {
 	}{
 		{"Adds repos", entry.AddRepos}, {"Removes repos", entry.RemoveRepos},
 		{"Claims tracker keys", entry.AddKeys}, {"Releases tracker keys", entry.RemoveKeys},
+		{"Adds environments", entry.AddEnvironments}, {"Removes environments", entry.RemoveEnvironments},
+		{"Adds services", entry.AddServices}, {"Removes services", entry.RemoveServices},
 	} {
 		if len(line.items) > 0 {
 			fmt.Fprintf(&body, "\n**%s:** %s", line.label, strings.Join(line.items, ", "))

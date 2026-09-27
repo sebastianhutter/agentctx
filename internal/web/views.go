@@ -160,49 +160,58 @@ func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Every repository the project claims, whether or not anything has been
-	// recorded about it. They are part of what the project *is*; listing only
-	// the ones with findings makes a new project look like it has no
-	// repositories at all, and hides the ones still waiting to be written about.
+	s.render(w, "project.html", map[string]any{
+		"Page":         "projects",
+		"Project":      note,
+		"Body":         markdown(body),
+		"HasBody":      strings.TrimSpace(body) != "",
+		"Ready":        ready,
+		"Blocked":      blocked,
+		"Closed":       closed,
+		"Repos":        projectSubjects(st, note, entries, store.ScopeRepo),
+		"Environments": projectSubjects(st, note, entries, store.ScopeEnvironment),
+		"Services":     projectSubjects(st, note, entries, store.ScopeService),
+		"Recent":       decorate(lastN(entries, 15), cfg.Stale.MaxAgeDays),
+		"Entries":      len(entries),
+		"Issues":       projectIssues(st, id),
+		"Version":      s.version,
+	})
+}
+
+// subjectRow is a repo, environment or service as listed on a project page.
+type subjectRow struct {
+	ID           string
+	Consolidated bool
+	Findings     int
+}
+
+// projectSubjects lists every subject of one kind the project claims, whether
+// or not anything has been recorded about it. They are part of what the project
+// *is*; listing only the ones with findings makes a new project look like it
+// has no repositories at all, and hides the ones still waiting to be written
+// about.
+func projectSubjects(st *store.Store, note *store.ProjectNote, entries []*store.Entry, kind string) []subjectRow {
 	findings := map[string]int{}
 	for _, e := range entries {
-		if e.Scope == store.ScopeRepo && e.Repo != "" {
-			findings[e.Repo]++
+		if sub, ok := e.Subject(); ok && sub.Kind == kind {
+			findings[sub.ID]++
 		}
 	}
-	type repoRow struct {
-		Repo         string
-		Consolidated bool
-		Findings     int
+	listed := note.SubjectsOf(kind)
+	var rows []subjectRow
+	for _, id := range listed {
+		sub := store.Subject{Kind: kind, ID: id}
+		rows = append(rows, subjectRow{ID: id, Consolidated: subjectNoteExists(st, note.ID, sub), Findings: findings[id]})
 	}
-	var repos []repoRow
-	for _, repo := range note.Repos {
-		_, _, err := st.ReadRepoNote(id, repo)
-		repos = append(repos, repoRow{Repo: repo, Consolidated: err == nil, Findings: findings[repo]})
-	}
-	// A repository written about but not listed on the project note still
+	// A subject written about but not listed on the project note still
 	// deserves a page — the alternative is knowledge with nowhere to appear.
-	for repo := range findings {
-		if !containsString(note.Repos, repo) {
-			repos = append(repos, repoRow{Repo: repo, Findings: findings[repo]})
+	for id := range findings {
+		if !containsString(listed, id) {
+			rows = append(rows, subjectRow{ID: id, Findings: findings[id]})
 		}
 	}
-	sort.Slice(repos, func(i, j int) bool { return repos[i].Repo < repos[j].Repo })
-
-	s.render(w, "project.html", map[string]any{
-		"Page":    "projects",
-		"Project": note,
-		"Body":    markdown(body),
-		"HasBody": strings.TrimSpace(body) != "",
-		"Ready":   ready,
-		"Blocked": blocked,
-		"Closed":  closed,
-		"Repos":   repos,
-		"Recent":  decorate(lastN(entries, 15), cfg.Stale.MaxAgeDays),
-		"Entries": len(entries),
-		"Issues":  projectIssues(st, id),
-		"Version": s.version,
-	})
+	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+	return rows
 }
 
 func (s *Server) handleTask(w http.ResponseWriter, r *http.Request) {
@@ -309,6 +318,59 @@ func (s *Server) handleRepoNote(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSubjectNote is a project's page about an environment or a service, the
+// counterpart of handleRepoNote.
+//
+// Both ids come from the URL and become path segments, so they are validated
+// here rather than trusting the read to refuse them.
+func (s *Server) handleSubjectNote(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		st, cfg, err := s.newStore()
+		if err != nil {
+			s.fail(w, err, http.StatusInternalServerError)
+			return
+		}
+		projectID := r.PathValue("project")
+		sub := store.Subject{Kind: kind, ID: r.PathValue("id")}
+		if err := store.ValidateID("project", projectID); err != nil {
+			s.fail(w, err, http.StatusBadRequest)
+			return
+		}
+		if err := store.ValidateSubject(sub.Kind, sub.ID); err != nil {
+			s.fail(w, err, http.StatusBadRequest)
+			return
+		}
+		if _, _, err := st.ReadProject(projectID); err != nil {
+			s.fail(w, err, http.StatusNotFound)
+			return
+		}
+
+		_, body, err := st.ReadSubjectNote(projectID, sub)
+		if err != nil {
+			body = ""
+		}
+		findings, err := st.Entries(projectID, store.EntryFilter{
+			Scope: kind, Subjects: []string{sub.ID}, Kinds: []string{store.KindFinding},
+		})
+		if err != nil {
+			s.fail(w, err, http.StatusInternalServerError)
+			return
+		}
+
+		s.render(w, "subject.html", map[string]any{
+			"Page":      "projects",
+			"ProjectID": projectID,
+			"Kind":      kind,
+			"Noun":      subjectNouns[kind],
+			"ID":        sub.ID,
+			"Body":      markdown(body),
+			"HasBody":   hasContent(body),
+			"Findings":  decorate(findings, cfg.Stale.MaxAgeDays),
+			"Version":   s.version,
+		})
+	}
+}
+
 // handleLog is the cross-cutting view: every entry, filtered by anything.
 //
 // The reason this interface exists at all. Obsidian reads one note at a time
@@ -322,9 +384,10 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	want := struct{ Project, Task, Kind, Host, Scope, Repo string }{
+	want := struct{ Project, Task, Kind, Host, Scope, Repo, Environment, Service string }{
 		Project: q.Get("project"), Task: q.Get("task"), Kind: q.Get("kind"),
 		Host: q.Get("host"), Scope: q.Get("scope"), Repo: q.Get("repo"),
+		Environment: q.Get("environment"), Service: q.Get("service"),
 	}
 
 	projects, err := st.ListProjects()
@@ -360,6 +423,10 @@ func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
 			case want.Host != "" && e.Host != want.Host:
 			case want.Scope != "" && e.Scope != want.Scope:
 			case want.Repo != "" && e.Repo != want.Repo:
+			// Case-folded, as the store matches subjects: the graph node these
+			// links come from joins every spelling of one name.
+			case want.Environment != "" && !strings.EqualFold(e.Environment, want.Environment):
+			case want.Service != "" && !strings.EqualFold(e.Service, want.Service):
 			default:
 				entries = append(entries, e)
 			}

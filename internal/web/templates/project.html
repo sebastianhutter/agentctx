@@ -22,17 +22,9 @@
   <p class="nudge">This project note has no body yet. Consolidate it to make it readable here and in Obsidian.</p>
 {{end}}
 
-{{if .Repos}}
-<h2>Repositories</h2>
-<ul class="plain">
-{{range .Repos}}
-  <li><a href="/project/{{$.Project.ID}}/repo/{{.Repo}}">{{.Repo}}</a>
-    {{if .Consolidated}}<span class="muted">consolidated</span>
-    {{else if .Findings}}<span class="nudge-inline">{{plural .Findings "finding" "findings"}}, not folded into a note yet</span>
-    {{else}}<span class="muted">nothing recorded yet</span>{{end}}</li>
-{{end}}
-</ul>
-{{end}}
+{{template "subjects" (dict "Title" "Repositories" "Kind" "repo" "Project" .Project.ID "Rows" .Repos)}}
+{{template "subjects" (dict "Title" "Environments" "Kind" "environment" "Project" .Project.ID "Rows" .Environments)}}
+{{template "subjects" (dict "Title" "Services" "Kind" "service" "Project" .Project.ID "Rows" .Services)}}
 
 {{if .Ready}}
 <h2>Ready to start</h2>
@@ -67,3 +59,16 @@
 {{template "entrylist" .Recent}}
 <p><a href="/log?project={{.Project.ID}}">All entries →</a></p>
 {{end}}
+
+{{/* One list per subject kind; .Kind is also the page's path segment. */}}
+{{define "subjects"}}{{if .Rows}}
+<h2>{{.Title}}</h2>
+<ul class="plain">
+{{range .Rows}}
+  <li><a href="/project/{{$.Project}}/{{$.Kind}}/{{.ID}}">{{.ID}}</a>
+    {{if .Consolidated}}<span class="muted">consolidated</span>
+    {{else if .Findings}}<span class="nudge-inline">{{plural .Findings "finding" "findings"}}, not folded into a note yet</span>
+    {{else}}<span class="muted">nothing recorded yet</span>{{end}}</li>
+{{end}}
+</ul>
+{{end}}{{end}}

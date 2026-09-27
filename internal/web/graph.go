@@ -11,24 +11,27 @@ import (
 	"github.com/sebastianhutter/agentctx/internal/store"
 )
 
-// Node kinds in the graph.
+// Node kinds in the graph. The three subject kinds are named after their
+// scopes, so an entry's scope is also the kind of node it is about.
 const (
-	nodeProject = "project"
-	nodeTask    = "task"
-	nodeRepo    = "repo"
-	nodeEntry   = "entry"
+	nodeProject     = "project"
+	nodeTask        = "task"
+	nodeRepo        = store.ScopeRepo
+	nodeEnvironment = store.ScopeEnvironment
+	nodeService     = store.ScopeService
+	nodeEntry       = "entry"
 )
 
 // Edge relations in the graph.
 const (
 	relIn     = "in"      // task → project
-	relOwns   = "owns"    // project → repo, listed on the project note
-	relUses   = "uses"    // project → repo, written about but not listed
-	relTouch  = "touches" // task → repo
+	relOwns   = "owns"    // project → subject, listed on the project note
+	relUses   = "uses"    // project → subject, written about but not listed
+	relTouch  = "touches" // task → subject
 	relWaits  = "waits"   // task → the task it waits for, still open
 	relWaited = "waited"  // task → a blocker that has since closed
 	relLogged = "logged"  // entry → its task, or its project
-	relAbout  = "about"   // entry → the repo it is about
+	relAbout  = "about"   // entry → the subject it is about
 )
 
 // graphNode is one node as the page draws it.
@@ -39,12 +42,12 @@ type graphNode struct {
 	Title   string `json:"title,omitempty"`
 	Project string `json:"project,omitempty"`
 	// State is the thing a colour encodes: ready/blocked/closed for a task,
-	// the scope for an entry, consolidated/unconsolidated for a repo.
+	// the scope for an entry, consolidated/unconsolidated for a subject.
 	State  string `json:"state,omitempty"`
 	Detail string `json:"detail,omitempty"`
 	URL    string `json:"url,omitempty"`
 	// Weight sizes the node: entries for a project or task, findings for a
-	// repo.
+	// subject.
 	Weight int    `json:"weight"`
 	TS     string `json:"ts,omitempty"`
 	// Warn counts the warnings store.Check reports about this node.
@@ -58,8 +61,8 @@ type graphEdge struct {
 	Source string `json:"source"`
 	Target string `json:"target"`
 	Rel    string `json:"rel"`
-	// Weight is how many times the relation was recorded: for a task → repo
-	// edge, the task note listing the repo plus each entry about it.
+	// Weight is how many times the relation was recorded: for a task → subject
+	// edge, the task note listing it plus each entry about it.
 	Weight int `json:"weight"`
 }
 
@@ -98,18 +101,53 @@ func (b *graphBuilder) edge(source, target, rel string) {
 
 func projectNodeID(p string) string { return "project:" + p }
 func taskNodeID(p, t string) string { return "task:" + p + "/" + t }
-func repoNodeID(repo string) string { return "repo:" + strings.ToLower(repo) }
+func repoNodeID(repo string) string {
+	return subjectNodeID(store.Subject{Kind: store.ScopeRepo, ID: repo})
+}
+
+// subjectNodeID keys a subject by kind and name alone, case-folded, so the
+// same thing logged from two projects is one node.
+func subjectNodeID(sub store.Subject) string { return sub.Kind + ":" + strings.ToLower(sub.ID) }
+
+// mentions returns the subjects an entry names. A repo can be named by an
+// entry of any scope, as the place the work happened; an environment or a
+// service only by an entry scoped to it, since the store refuses them anywhere
+// else.
+func mentions(e *store.Entry) []store.Subject {
+	var out []store.Subject
+	for _, sub := range []store.Subject{
+		{Kind: store.ScopeRepo, ID: e.Repo},
+		{Kind: store.ScopeEnvironment, ID: e.Environment},
+		{Kind: store.ScopeService, ID: e.Service},
+	} {
+		if sub.ID != "" {
+			out = append(out, sub)
+		}
+	}
+	return out
+}
+
+// subjectNoteExists reports whether a project has a page about a subject.
+// Repos keep going through ReadRepoNote, which also refuses an unreadable one.
+func subjectNoteExists(st *store.Store, project string, sub store.Subject) bool {
+	if sub.Kind == store.ScopeRepo {
+		_, _, err := st.ReadRepoNote(project, sub.ID)
+		return err == nil
+	}
+	return st.SubjectNoteExists(project, sub)
+}
 func entryNodeID(p string, e *store.Entry) string {
 	return "entry:" + p + "/" + filepath.Base(e.Path)
 }
 
 // buildGraph folds the vault into nodes and edges.
 //
-// Repos are keyed by name alone, not by project: the point of drawing this at
-// all is that one repository worked on from two projects shows up as one node
-// joining them, which neither Obsidian's graph nor a per-project page can show.
-// A project's own repo notes stay per project; the node links to the log
-// filtered by repo, which crosses projects.
+// Subjects — repos, environments, services — are keyed by name alone, not by
+// project: the point of drawing this at all is that one repository (or one
+// environment) worked on from two projects shows up as one node joining them,
+// which neither Obsidian's graph nor a per-project page can show. A project's
+// own subject pages stay per project; the node links to the log filtered by
+// that subject, which crosses projects.
 //
 // The opened and closed entries are left out of the entry nodes, since the
 // task's state already says what they say, and so are dependency entries,
@@ -121,8 +159,9 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 	}
 
 	b := &graphBuilder{nodes: map[string]*graphNode{}, edges: map[edgeKey]int{}}
-	repoProjects := map[string]map[string]bool{}
-	repoConsolidated := map[string]bool{}
+	// Both keyed by node id.
+	subjectProjects := map[string]map[string]bool{}
+	subjectConsolidated := map[string]bool{}
 
 	for _, pid := range ids {
 		if only != "" && pid != only {
@@ -160,29 +199,32 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 			p.TS = entries[len(entries)-1].TS
 		}
 
-		addRepo := func(repo string) string {
-			key := strings.ToLower(repo)
-			if repoProjects[key] == nil {
-				repoProjects[key] = map[string]bool{}
+		addSubject := func(sub store.Subject) string {
+			id := subjectNodeID(sub)
+			if subjectProjects[id] == nil {
+				subjectProjects[id] = map[string]bool{}
 			}
-			repoProjects[key][pid] = true
-			if _, _, err := st.ReadRepoNote(pid, repo); err == nil {
-				repoConsolidated[key] = true
+			subjectProjects[id][pid] = true
+			if subjectNoteExists(st, pid, sub) {
+				subjectConsolidated[id] = true
 			}
 			return b.node(graphNode{
-				ID: repoNodeID(repo), Kind: nodeRepo, Label: repo,
-				URL: "/log?repo=" + url.QueryEscape(repo),
+				ID: id, Kind: sub.Kind, Label: sub.ID,
+				URL: "/log?" + sub.Kind + "=" + url.QueryEscape(sub.ID),
 			}).ID
 		}
 
 		listed := map[string]bool{}
-		for _, repo := range note.Repos {
-			listed[strings.ToLower(repo)] = true
-			b.edge(pnode, addRepo(repo), relOwns)
+		for _, kind := range store.SubjectKinds() {
+			for _, id := range note.SubjectsOf(kind) {
+				sub := store.Subject{Kind: kind, ID: id}
+				listed[subjectNodeID(sub)] = true
+				b.edge(pnode, addSubject(sub), relOwns)
+			}
 		}
-		usedBy := func(repo string) {
-			if !listed[strings.ToLower(repo)] {
-				b.edge(pnode, addRepo(repo), relUses)
+		usedBy := func(sub store.Subject) {
+			if !listed[subjectNodeID(sub)] {
+				b.edge(pnode, addSubject(sub), relUses)
 			}
 		}
 
@@ -212,7 +254,7 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 			})
 			b.edge(tnode.ID, pnode, relIn)
 			for _, repo := range tn.Repos {
-				usedBy(repo)
+				usedBy(store.Subject{Kind: store.ScopeRepo, ID: repo})
 				b.edge(tnode.ID, repoNodeID(repo), relTouch)
 			}
 		}
@@ -237,13 +279,14 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 			if e.Task != "" && b.nodes[taskNodeID(pid, e.Task)] != nil {
 				owner = taskNodeID(pid, e.Task)
 			}
-			if e.Repo != "" {
-				usedBy(e.Repo)
+			about := mentions(e)
+			for _, sub := range about {
+				usedBy(sub)
 				if owner != pnode {
-					b.edge(owner, repoNodeID(e.Repo), relTouch)
+					b.edge(owner, subjectNodeID(sub), relTouch)
 				}
-				if e.Scope == store.ScopeRepo && e.Kind == store.KindFinding {
-					b.nodes[repoNodeID(e.Repo)].Weight++
+				if e.Scope == sub.Kind && e.Kind == store.KindFinding {
+					b.nodes[subjectNodeID(sub)].Weight++
 				}
 			}
 
@@ -273,14 +316,14 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 				Project: pid, State: e.Scope, Detail: detail, URL: logURL, Weight: 1, TS: e.TS,
 			})
 			b.edge(enode.ID, owner, relLogged)
-			if e.Repo != "" {
-				b.edge(enode.ID, repoNodeID(e.Repo), relAbout)
+			for _, sub := range about {
+				b.edge(enode.ID, subjectNodeID(sub), relAbout)
 			}
 		}
 	}
 
-	for key, projects := range repoProjects {
-		n := b.nodes["repo:"+key]
+	for id, projects := range subjectProjects {
+		n := b.nodes[id]
 		names := make([]string, 0, len(projects))
 		for p := range projects {
 			names = append(names, p)
@@ -288,7 +331,7 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 		sort.Strings(names)
 		n.Detail = strings.Join(names, ", ")
 		n.State = "unconsolidated"
-		if repoConsolidated[key] {
+		if subjectConsolidated[id] {
 			n.State = "consolidated"
 		}
 		if len(names) > 1 {
@@ -303,7 +346,13 @@ func buildGraph(st *store.Store, only string) (*graphData, error) {
 			if i.Severity != store.SeverityWarn || i.Project == "" {
 				continue
 			}
-			for _, id := range []string{taskNodeID(i.Project, i.Subject), repoNodeID(i.Subject), projectNodeID(i.Project)} {
+			for _, id := range []string{
+				taskNodeID(i.Project, i.Subject),
+				repoNodeID(i.Subject),
+				subjectNodeID(store.Subject{Kind: store.ScopeEnvironment, ID: i.Subject}),
+				subjectNodeID(store.Subject{Kind: store.ScopeService, ID: i.Subject}),
+				projectNodeID(i.Project),
+			} {
 				if n := b.nodes[id]; n != nil {
 					n.Warn++
 					break

@@ -24,7 +24,8 @@ const (
 
 // Finding scopes. The scope decides what survives the task, which is the whole
 // point of the system: a task-scoped finding dies with the work, a repo- or
-// project-scoped one is what makes the next task cheaper.
+// project-scoped one is what makes the next task cheaper. Environment and
+// service scopes live in subject.go beside the Subject they name.
 const (
 	ScopeTask    = "task"
 	ScopeRepo    = "repo"
@@ -106,11 +107,17 @@ type Source struct {
 
 // Entry is one append-only log file.
 type Entry struct {
-	Kind       string  `yaml:"kind"`
-	Task       string  `yaml:"task,omitempty"`
-	Project    string  `yaml:"project"`
-	Scope      string  `yaml:"scope"`
-	Repo       string  `yaml:"repo,omitempty"`
+	Kind    string `yaml:"kind"`
+	Task    string `yaml:"task,omitempty"`
+	Project string `yaml:"project"`
+	Scope   string `yaml:"scope"`
+	Repo    string `yaml:"repo,omitempty"`
+
+	// Environment and Service name the subject of an entry scoped to one, as
+	// Repo does for a repo-scoped entry. See Subject.
+	Environment string `yaml:"environment,omitempty"`
+	Service     string `yaml:"service,omitempty"`
+
 	TS         string  `yaml:"ts"`
 	Host       string  `yaml:"host"`
 	Session    string  `yaml:"session,omitempty"`
@@ -146,11 +153,18 @@ type Entry struct {
 	AddKeys     []string `yaml:"add_tracker_keys,omitempty"`
 	RemoveKeys  []string `yaml:"remove_tracker_keys,omitempty"`
 
-	// Parent and RepoNote are links rendered from Task, Project and Repo when
-	// the entry is written. See PropParent. Never read back: the ids are what
-	// agentctx works from.
-	Parent   string `yaml:"parent,omitempty"`
-	RepoNote string `yaml:"repo_note,omitempty"`
+	// The same for the environments and services a project works with.
+	AddEnvironments    []string `yaml:"add_environments,omitempty"`
+	RemoveEnvironments []string `yaml:"remove_environments,omitempty"`
+	AddServices        []string `yaml:"add_services,omitempty"`
+	RemoveServices     []string `yaml:"remove_services,omitempty"`
+
+	// Parent, RepoNote and SubjectNote are links rendered from Task, Project
+	// and the subject when the entry is written. See PropParent. Never read
+	// back: the ids are what agentctx works from.
+	Parent      string `yaml:"parent,omitempty"`
+	RepoNote    string `yaml:"repo_note,omitempty"`
+	SubjectNote string `yaml:"subject_note,omitempty"`
 
 	// Body is the entry itself and is never part of the frontmatter.
 	Body string `yaml:"-"`
@@ -229,12 +243,18 @@ type TaskNote struct {
 // JiraProjects and GitLabGroups are the key-prefix to project mapping: they are
 // how PROJ-142 resolves to a folder. Projects are created deliberately and never
 // inferred, so this mapping is always something a human wrote down.
+//
+// Repos, Environments and Services are the subjects the project works with.
+// Listing one is what brings its findings, including other projects', into
+// every bundle of this project.
 type ProjectNote struct {
 	ID                  string   `yaml:"id"`
 	Name                string   `yaml:"name"`
 	JiraProjects        []string `yaml:"jira_projects,omitempty"`
 	GitLabGroups        []string `yaml:"gitlab_groups,omitempty"`
 	Repos               []string `yaml:"repos,omitempty"`
+	Environments        []string `yaml:"environments,omitempty"`
+	Services            []string `yaml:"services,omitempty"`
 	ConfluenceSpaces    []string `yaml:"confluence_spaces,omitempty"`
 	Created             string   `yaml:"created"`
 	ConsolidatedThrough string   `yaml:"consolidated_through,omitempty"`

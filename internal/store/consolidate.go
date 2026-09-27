@@ -48,6 +48,74 @@ func (s *Store) ReadRepoNote(project, repo string) (*RepoNote, string, error) {
 	return &note, body, nil
 }
 
+// SubjectNote is the frontmatter of a page about an environment or a service,
+// notes/environments/<id>.md or notes/services/<id>.md, folded out of the
+// findings scoped to it. Repositories keep RepoNote and their place directly
+// under notes/, where they were first.
+type SubjectNote struct {
+	ID                  string `yaml:"id"`
+	Kind                string `yaml:"kind"`
+	Environment         string `yaml:"environment,omitempty"`
+	Service             string `yaml:"service,omitempty"`
+	Project             string `yaml:"project"`
+	Created             string `yaml:"created"`
+	ConsolidatedThrough string `yaml:"consolidated_through,omitempty"`
+
+	// Parent links the note to its project note. See PropParent.
+	Parent string `yaml:"parent,omitempty"`
+}
+
+// Subject returns what the note is about.
+func (n SubjectNote) Subject() Subject {
+	id := n.Environment
+	if n.Kind == ScopeService {
+		id = n.Service
+	}
+	return Subject{Kind: n.Kind, ID: id}
+}
+
+// subjectDirs are the folders under notes/ that hold each kind's pages. A
+// folder per kind, so acme/production the environment and acme/production the
+// repository cannot land on one file.
+var subjectDirs = map[string]string{
+	ScopeEnvironment: "environments",
+	ScopeService:     "services",
+}
+
+// SubjectNotePath returns where a subject's page lives: notes/<repo>.md for a
+// repository, notes/environments/<id>.md and notes/services/<id>.md for the
+// others.
+func (s *Store) SubjectNotePath(project string, sub Subject) string {
+	if dir, ok := subjectDirs[sub.Kind]; ok {
+		return filepath.Join(s.NotesDir(project), dir, sanitise(sub.ID)+".md")
+	}
+	return s.RepoNotePath(project, sub.ID)
+}
+
+// SubjectNoteExists reports whether a subject's page has been written.
+func (s *Store) SubjectNoteExists(project string, sub Subject) bool {
+	return vault.Exists(s.SubjectNotePath(project, sub))
+}
+
+// ReadSubjectNote reads the page about an environment or a service.
+func (s *Store) ReadSubjectNote(project string, sub Subject) (*SubjectNote, string, error) {
+	if err := ValidateID("project", project); err != nil {
+		return nil, "", err
+	}
+	if _, ok := subjectDirs[sub.Kind]; !ok {
+		return nil, "", fmt.Errorf("%q has no subject page of its own: read a repository with ReadRepoNote", sub.Kind)
+	}
+	if err := ValidateSubject(sub.Kind, sub.ID); err != nil {
+		return nil, "", err
+	}
+	var note SubjectNote
+	body, err := vault.ReadInto(s.SubjectNotePath(project, sub), &note)
+	if err != nil {
+		return nil, "", err
+	}
+	return &note, body, nil
+}
+
 // rewrite replaces a note's contents. The only function in this package that
 // does, and the reason consolidation is a distinct verb rather than something
 // any agent can do: every other write here appends a file.
@@ -172,6 +240,49 @@ func (s *Store) ConsolidateRepo(projectID, repo, body, through, expectThrough st
 		return err
 	}
 	slog.Info("consolidated repo note", "project", projectID, "repo", repo, "through", through)
+	return nil
+}
+
+// ConsolidateSubject replaces the body of a subject's page, creating it if
+// missing. A repository goes to ConsolidateRepo, so its page stays where it
+// always was.
+func (s *Store) ConsolidateSubject(projectID string, sub Subject, body, through, expectThrough string, checked bool) error {
+	if sub.Kind == ScopeRepo {
+		return s.ConsolidateRepo(projectID, sub.ID, body, through, expectThrough, checked)
+	}
+	note, _, err := s.ReadSubjectNote(projectID, sub)
+	switch {
+	case err == nil:
+		if checked && note.ConsolidatedThrough != expectThrough {
+			return fmt.Errorf("%w: it is now at %q, you were working from %q — re-read it and fold again",
+				ErrConsolidationConflict, note.ConsolidatedThrough, expectThrough)
+		}
+	case os.IsNotExist(err):
+		note = &SubjectNote{
+			ID:      sanitise(sub.ID),
+			Kind:    sub.Kind,
+			Project: projectID,
+			Created: s.now().Format(LayoutDate),
+		}
+		if sub.Kind == ScopeEnvironment {
+			note.Environment = sub.ID
+		} else {
+			note.Service = sub.ID
+		}
+	default:
+		return err
+	}
+
+	note.ConsolidatedThrough = through
+	note.Parent = s.ProjectLink(projectID)
+	data, err := vault.Render(note, body)
+	if err != nil {
+		return err
+	}
+	if err := rewrite(s.SubjectNotePath(projectID, sub), data); err != nil {
+		return err
+	}
+	slog.Info("consolidated subject note", "project", projectID, "subject", sub.String(), "through", through)
 	return nil
 }
 

@@ -76,8 +76,8 @@ var findTool = mcp.NewTool("find",
 			"Returns places to look, not what is recorded there: ids, titles, and why each "+
 			"matched. Open one to get the actual knowledge. With no arguments it lists "+
 			"everything, which is the fastest way to see whether this work has a project at all.\n\n"+
-			"Matching is literal and case-insensitive, over ids, titles, repositories, tracker "+
-			"keys and the text of anything logged — so a query describing a problem can surface "+
+			"Matching is literal and case-insensitive, over ids, titles, repositories, "+
+			"environments, services, tracker keys and the text of anything logged — so a query describing a problem can surface "+
 			"the task where it was solved. It is not a semantic search; for that, search the "+
 			"vault with whatever retrieval tool indexes it."),
 	mcp.WithString("query",
@@ -117,8 +117,9 @@ func (h *handlers) find(ctx context.Context, request mcp.CallToolRequest) (*mcp.
 
 var openProjectTool = mcp.NewTool("open_project",
 	mcp.WithDescription(
-		"What do we know about this project? Returns project-scoped findings, per-repository "+
-			"findings and the list of open tasks.\n\n"+
+		"What do we know about this project? Returns project-scoped findings, findings per "+
+			"repository, environment and service, what other projects know about those, and the "+
+			"list of open tasks.\n\n"+
 			"Creates the project note on first call, which needs the arguments below: the tracker "+
 			"keys are what let a later open_task resolve PROJ-142 to this project, and they cannot "+
 			"be guessed. Projects are deliberate and few; tasks are created lazily and are many."),
@@ -134,6 +135,13 @@ var openProjectTool = mcp.NewTool("open_project",
 	mcp.WithArray("repos", mcp.WithStringItems(),
 		mcp.Description("Repositories this project owns, e.g. [\"acme/infrastructure\"]. "+
 			"Repo-scoped findings are collected per entry here.")),
+	mcp.WithArray("environments", mcp.WithStringItems(),
+		mcp.Description("Environments the project deploys to or runs in, by owner and name, e.g. "+
+			"[\"acme/staging\", \"acme/production\"]. The owner is required: every organisation has a "+
+			"production.")),
+	mcp.WithArray("services", mcp.WithStringItems(),
+		mcp.Description("Services the project depends on: a SaaS product by its name, e.g. [\"idp\"], "+
+			"or a self-hosted instance by owner and name, e.g. [\"acme/idp\"].")),
 	mcp.WithArray("confluence_spaces", mcp.WithStringItems(),
 		mcp.Description("Wiki spaces belonging to this project.")),
 )
@@ -155,6 +163,8 @@ func (h *handlers) openProject(ctx context.Context, request mcp.CallToolRequest)
 		JiraProjects:     request.GetStringSlice("jira_projects", nil),
 		GitLabGroups:     request.GetStringSlice("gitlab_groups", nil),
 		Repos:            request.GetStringSlice("repos", nil),
+		Environments:     request.GetStringSlice("environments", nil),
+		Services:         request.GetStringSlice("services", nil),
 		ConfluenceSpaces: request.GetStringSlice("confluence_spaces", nil),
 	})
 	if err != nil {
@@ -168,7 +178,10 @@ func (h *handlers) openProject(ctx context.Context, request mcp.CallToolRequest)
 var openTaskTool = mcp.NewTool("open_task",
 	mcp.WithDescription(
 		"Call this before reading code. Returns everything already known about a task, the "+
-			"project it belongs to and the repositories it touches, plus the working agreement.\n\n"+
+			"project it belongs to, the repositories it touches and the environments and services "+
+			"its project works with, plus the working agreement. What other projects learned "+
+			"about the same repositories, environments and services comes back too, as headlines "+
+			"marked with the project they came from.\n\n"+
 			"The task id is always given, never guessed: it is usually the tracker key in lower "+
 			"case, and it is the first line of what this returns, so later calls can quote it.\n\n"+
 			"On a task that does not exist yet, pass seed_title (and seed_source_key / seed_url / "+
@@ -288,10 +301,17 @@ func (h *handlers) logDecision(ctx context.Context, request mcp.CallToolRequest)
 var logFindingTool = mcp.NewTool("log_finding",
 	mcp.WithDescription(
 		"Record something you looked up and confirmed, with where it came from.\n\n"+
-			"Scope is the important argument. scope=repo and scope=project outlive the task and are "+
-			"what make the next piece of work cheaper; scope=task dies with this one. If the finding "+
-			"would help someone who has never heard of this task, it is not task-scoped — prefer the "+
-			"wider scope when in doubt.\n\n"+
+			"Scope is the important argument. Everything but scope=task outlives the task, and is "+
+			"what makes the next piece of work cheaper. If the finding would help someone who has "+
+			"never heard of this task, it is not task-scoped — prefer the wider scope when in doubt. "+
+			"Choose the narrowest thing it is true of:\n"+
+			"repo — a repository's code, build, tests, conventions.\n"+
+			"environment — a deployment environment: an account, a cluster, a stage. What was "+
+			"learned about it (a policy, a limit, a quirk), not an inventory of what runs there.\n"+
+			"service — a service the work depends on: an API's behaviour, a limit, a configuration.\n"+
+			"project — the project as a whole, when none of the above is the subject.\n"+
+			"Repo, environment and service findings are also shown to other projects that work with "+
+			"the same one.\n\n"+
 			"Provenance is required. Confidence is derived from the source kind rather than asserted: "+
 			"a file at a known commit can be re-checked, a conversation cannot, and an inference is "+
 			"not evidence. You may pass a lower confidence than the derived one, never a higher.\n\n"+
@@ -319,10 +339,16 @@ var logFindingTool = mcp.NewTool("log_finding",
 			"unverifiable. For others: an issue key, a URL, a page title.")),
 	mcp.WithString("source_retrieved",
 		mcp.Description("Date you retrieved it, YYYY-MM-DD. Defaults to today. Drives the staleness marker.")),
-	mcp.WithString("scope", mcp.Enum(store.ScopeTask, store.ScopeRepo, store.ScopeProject),
-		mcp.Description("task | repo | project. Defaults to task, which is the least useful — choose deliberately.")),
+	mcp.WithString("scope", mcp.Enum(store.ScopeTask, store.ScopeRepo, store.ScopeEnvironment, store.ScopeService, store.ScopeProject),
+		mcp.Description("task | repo | environment | service | project. Defaults to task, which is the least useful — choose deliberately.")),
 	mcp.WithString("repo",
 		mcp.Description("Repository the finding is about. Required when scope=repo.")),
+	mcp.WithString("environment",
+		mcp.Description("Environment the finding is about, by owner and name, e.g. \"acme/production\". "+
+			"Required when scope=environment, and only allowed then.")),
+	mcp.WithString("service",
+		mcp.Description("Service the finding is about: \"idp\" for the product, \"acme/idp\" for one "+
+			"organisation's instance of it. Required when scope=service, and only allowed then.")),
 	mcp.WithString("confidence", mcp.Enum(store.ConfidenceHigh, store.ConfidenceMedium, store.ConfidenceLow),
 		mcp.Description("Optional. Only honoured when lower than the level derived from source_kind.")),
 	mcp.WithArray("supersedes", mcp.WithStringItems(),
@@ -362,10 +388,12 @@ func (h *handlers) logFinding(ctx context.Context, request mcp.CallToolRequest) 
 			Ref:       request.GetString("source_ref", ""),
 			Retrieved: request.GetString("source_retrieved", ""),
 		},
-		Scope:      request.GetString("scope", ""),
-		Repo:       request.GetString("repo", ""),
-		Confidence: request.GetString("confidence", ""),
-		Supersedes: request.GetStringSlice("supersedes", nil),
+		Scope:       request.GetString("scope", ""),
+		Repo:        request.GetString("repo", ""),
+		Environment: request.GetString("environment", ""),
+		Service:     request.GetString("service", ""),
+		Confidence:  request.GetString("confidence", ""),
+		Supersedes:  request.GetStringSlice("supersedes", nil),
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -461,8 +489,9 @@ var consolidateTool = mcp.NewTool("consolidate",
 			"claim with its provenance, and write what is now understood rather than what was "+
 			"said. Read the entries from open_task or open_project first.\n\n"+
 			"Targets: a task id for its note, a project id for the project note, or a project id "+
-			"with repo set for that repository's page under notes/ — which is where findings from "+
-			"many tasks accumulate into something the next task in that repo reads.\n\n"+
+			"with one of repo, environment or service set for that subject's page under notes/ — "+
+			"which is where findings from many tasks accumulate into something the next task "+
+			"touching it reads.\n\n"+
 			"Log entries are never edited or deleted. Consolidation is compaction, so anything "+
 			"logged after the fold still comes back separately."),
 	mcp.WithString("target_id", mcp.Required(),
@@ -471,6 +500,10 @@ var consolidateTool = mcp.NewTool("consolidate",
 		mcp.Description("The composed markdown body, written verbatim. Use the note's section headings.")),
 	mcp.WithString("repo",
 		mcp.Description("With a project target: fold that repository's findings into notes/<repo>.md instead.")),
+	mcp.WithString("environment",
+		mcp.Description("With a project target: fold that environment's findings into notes/environments/<id>.md instead.")),
+	mcp.WithString("service",
+		mcp.Description("With a project target: fold that service's findings into notes/services/<id>.md instead.")),
 	mcp.WithString("expect_consolidated_through",
 		mcp.Description("The consolidated_through you read. Refuses if it has moved since, so two "+
 			"sessions folding at once cannot overwrite each other. Pass \"\" when the note has never "+
@@ -493,9 +526,11 @@ func (h *handlers) consolidate(ctx context.Context, request mcp.CallToolRequest)
 	}
 
 	req := service.ConsolidateRequest{
-		TargetID: targetID,
-		Repo:     request.GetString("repo", ""),
-		Body:     body,
+		TargetID:    targetID,
+		Repo:        request.GetString("repo", ""),
+		Environment: request.GetString("environment", ""),
+		Service:     request.GetString("service", ""),
+		Body:        body,
 	}
 	if raw, ok := request.GetArguments()["expect_consolidated_through"]; ok {
 		if expect, ok := raw.(string); ok {
@@ -555,10 +590,13 @@ func (h *handlers) closeTask(ctx context.Context, request mcp.CallToolRequest) (
 
 var amendProjectTool = mcp.NewTool("amend_project",
 	mcp.WithDescription(
-		"Add or remove a project's repositories and tracker keys, when the work shows the project is "+
-			"missing one. open_task lists such gaps under \"Project gaps\" with the exact call.\n\n"+
+		"Add or remove a project's repositories, tracker keys, environments and services, when the work "+
+			"shows the project is missing one. open_task lists such gaps under \"Project gaps\" with the "+
+			"exact call.\n\n"+
 			"A repository the project does not list is one whose findings the next task never sees. A tracker "+
-			"key no project claims is one open_task cannot resolve without being told the project.\n\n"+
+			"key no project claims is one open_task cannot resolve without being told the project. Listing an "+
+			"environment or a service brings what other projects know about it into this project's bundles "+
+			"before anything has been logged about it here.\n\n"+
 			"Each call is recorded in the log with its reason, so it can be undone by another. Claiming a key "+
 			"is refused when another project claims it, when tasks in another project use it (a shared "+
 			"tracker: keep passing project to open_task instead), or when no task in this project uses it yet."),
@@ -569,6 +607,12 @@ var amendProjectTool = mcp.NewTool("amend_project",
 	mcp.WithArray("add_tracker_keys", mcp.WithStringItems(),
 		mcp.Description("Tracker key prefixes the project's tasks come from, e.g. [\"PROJ\"] for PROJ-142.")),
 	mcp.WithArray("remove_tracker_keys", mcp.WithStringItems(), mcp.Description("Tracker keys to release.")),
+	mcp.WithArray("add_environments", mcp.WithStringItems(),
+		mcp.Description("Environments the project works with, by owner and name, e.g. [\"acme/production\"].")),
+	mcp.WithArray("remove_environments", mcp.WithStringItems(), mcp.Description("Environments it does not work with after all.")),
+	mcp.WithArray("add_services", mcp.WithStringItems(),
+		mcp.Description("Services the project depends on, e.g. [\"idp\"] or [\"acme/idp\"].")),
+	mcp.WithArray("remove_services", mcp.WithStringItems(), mcp.Description("Services it does not depend on after all.")),
 	mcp.WithString("reason", mcp.Required(),
 		mcp.Description("Why these belong, or do not: what showed it.")),
 )
@@ -588,7 +632,12 @@ func (h *handlers) amendProject(ctx context.Context, request mcp.CallToolRequest
 		RemoveRepos: request.GetStringSlice("remove_repos", nil),
 		AddKeys:     request.GetStringSlice("add_tracker_keys", nil),
 		RemoveKeys:  request.GetStringSlice("remove_tracker_keys", nil),
-		Reason:      request.GetString("reason", ""),
+
+		AddEnvironments:    request.GetStringSlice("add_environments", nil),
+		RemoveEnvironments: request.GetStringSlice("remove_environments", nil),
+		AddServices:        request.GetStringSlice("add_services", nil),
+		RemoveServices:     request.GetStringSlice("remove_services", nil),
+		Reason:             request.GetString("reason", ""),
 	})
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

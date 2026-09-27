@@ -25,6 +25,8 @@ the same words, at the moment the work is about to start.
 | A finding names its source | `source_kind` required | A claim with no provenance cannot be re-verified and is worth less than no claim — it looks like knowledge |
 | A decision gives a reason | `rationale` required | Without it a decision can only be second-guessed later, never re-evaluated |
 | A repo-scoped finding names its repo | validation | Otherwise the next task in that repository never finds it |
+| An environment or service finding names it, under its own scope | validation | A subject with the wrong scope is filed where nobody looks for it; the task-scoped default would lose it with the task |
+| An environment id carries its owner | validation | Every organisation has a `production`; a bare name would join all of them into one |
 | A task is not created out of thin air | seed required on creation | agentctx holds no tracker credentials; the agent has to go look, and the task's first recorded fact is where it came from |
 | A project is never invented | `open_project` required first | An auto-created project silently splits one corpus in two |
 | A session does not close empty | `close_task` refuses | A session that learned nothing worth recording is usually one that forgot to record it |

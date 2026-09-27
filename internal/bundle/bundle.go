@@ -75,12 +75,19 @@ type TaskBundle struct {
 	ProjectFindings []Marked
 	RepoFindings    map[string][]Marked
 
-	// ElsewhereFindings are repo-scoped findings about the task's repositories
-	// that other projects logged. A repository id names one repository
-	// wherever it appears, so what another workstream learned there is as true
-	// here. Kept apart from RepoFindings because many are pinned to a moment,
-	// or say "this project", that belonged to the project that wrote them.
-	ElsewhereFindings map[string][]Marked
+	// SubjectFindings are the project's findings about its environments and
+	// services. Every task in the project gets them, as it gets project-scoped
+	// findings: a task names its repositories, but nothing names its
+	// environments.
+	SubjectFindings map[store.Subject][]Marked
+
+	// ElsewhereFindings are findings about the same subjects — the task's
+	// repositories, the project's environments and services — that other
+	// projects logged. A subject id names one thing wherever it appears, so
+	// what another workstream learned there is as true here. Kept apart, and
+	// as headlines only, because many are pinned to a moment, or say "this
+	// project", that belonged to the project that wrote them.
+	ElsewhereFindings map[store.Subject][]Marked
 }
 
 // ProjectBundle is what open_project returns.
@@ -91,9 +98,13 @@ type ProjectBundle struct {
 	Findings    []Marked
 	RepoNotes   map[string][]Marked
 
-	// ElsewhereNotes are the project's repositories as other projects know
-	// them. See TaskBundle.ElsewhereFindings.
-	ElsewhereNotes map[string][]Marked
+	// SubjectNotes are the findings about the project's environments and
+	// services.
+	SubjectNotes map[store.Subject][]Marked
+
+	// ElsewhereNotes are the project's subjects as other projects know them.
+	// See TaskBundle.ElsewhereFindings.
+	ElsewhereNotes map[store.Subject][]Marked
 
 	// OpenTasks are the ones that can be started now.
 	OpenTasks []string
@@ -193,7 +204,7 @@ func (a *Assembler) Task(project, taskID string) (*TaskBundle, error) {
 		}
 	}
 
-	if b.ElsewhereFindings, err = a.elsewhere(project, note.Repos); err != nil {
+	if b.SubjectFindings, b.ElsewhereFindings, err = a.subjects(project, note.Repos); err != nil {
 		return nil, err
 	}
 
@@ -229,7 +240,7 @@ func (a *Assembler) Project(projectID string) (*ProjectBundle, error) {
 		}
 	}
 
-	if b.ElsewhereNotes, err = a.elsewhere(projectID, note.Repos); err != nil {
+	if b.SubjectNotes, b.ElsewhereNotes, err = a.subjects(projectID, note.Repos); err != nil {
 		return nil, err
 	}
 
@@ -260,26 +271,60 @@ func (a *Assembler) Project(projectID string) (*ProjectBundle, error) {
 	return b, nil
 }
 
-// elsewhere collects the repo-scoped findings about repos that every project
-// other than this one has logged, keyed by the repo as this project spells it.
+// subjects collects what is known about a project's environments and services,
+// and what other projects know about those and about repos.
+//
+// repos are the repositories the bundle already shows the project's own
+// findings for: a task's, or the project's. Environments and services have no
+// such per-task list, so they are the project's (see store.ProjectSubjects).
+func (a *Assembler) subjects(project string, repos []string) (own, elsewhere map[store.Subject][]Marked, err error) {
+	own = map[store.Subject][]Marked{}
+	elsewhere = map[store.Subject][]Marked{}
+	for _, kind := range store.SubjectKinds() {
+		ids := repos
+		if kind != store.ScopeRepo {
+			if ids, err = a.Store.ProjectSubjects(project, kind); err != nil {
+				return nil, nil, err
+			}
+			for _, id := range ids {
+				entries, err := a.Store.Entries(project, store.EntryFilter{
+					Scope: kind, Subjects: []string{id}, Kinds: []string{store.KindFinding},
+				})
+				if err != nil {
+					return nil, nil, err
+				}
+				if len(entries) > 0 {
+					own[store.Subject{Kind: kind, ID: id}] = a.mark(entries)
+				}
+			}
+		}
+		if err := a.elsewhere(elsewhere, project, kind, ids); err != nil {
+			return nil, nil, err
+		}
+	}
+	return own, elsewhere, nil
+}
+
+// elsewhere adds the findings about subjects of one kind that every project
+// other than this one has logged, keyed by the subject as this project spells
+// it.
 //
 // Only reads move. Each entry stays in the project that wrote it, so nothing
 // here weakens append-only; it is the same fold-on-read as amendments.
-func (a *Assembler) elsewhere(project string, repos []string) (map[string][]Marked, error) {
-	out := map[string][]Marked{}
-	if len(repos) == 0 {
-		return out, nil
+func (a *Assembler) elsewhere(out map[store.Subject][]Marked, project, kind string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
 	}
 	projects, err := a.Store.ListProjects()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, other := range projects {
 		if other == project {
 			continue
 		}
 		entries, err := a.Store.Entries(other, store.EntryFilter{
-			Scope: store.ScopeRepo, Repos: repos, Kinds: []string{store.KindFinding},
+			Scope: kind, Subjects: ids, Kinds: []string{store.KindFinding},
 		})
 		if err != nil {
 			// Another project's broken folder must not take out this bundle.
@@ -288,15 +333,17 @@ func (a *Assembler) elsewhere(project string, repos []string) (map[string][]Mark
 		}
 		for i, m := range a.mark(entries) {
 			m.From = other
-			for _, repo := range repos {
-				if strings.EqualFold(repo, entries[i].Repo) {
-					out[repo] = append(out[repo], m)
+			sub, _ := entries[i].Subject()
+			for _, id := range ids {
+				if strings.EqualFold(id, sub.ID) {
+					key := store.Subject{Kind: kind, ID: id}
+					out[key] = append(out[key], m)
 					break
 				}
 			}
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // mark applies the staleness rules.
@@ -396,7 +443,7 @@ func (b *TaskBundle) Render() string {
 		out.WriteString("\n")
 	}
 
-	renderSection(&out, "Since the last consolidation", b.Unconsolidated, true)
+	renderSection(&out, "Since the last consolidation", b.Unconsolidated, withKind)
 
 	// A note whose body is empty while the log holds everything is a note
 	// nobody can read. Say so where it will be noticed, with the number, since
@@ -408,7 +455,7 @@ func (b *TaskBundle) Render() string {
 			"target_id `%s` (consolidated_through `%s`).\n",
 			n, b.Task.ID, b.Task.ConsolidatedThrough)
 	}
-	renderSection(&out, "What we know about this project", b.ProjectFindings, false)
+	renderSection(&out, "What we know about this project", b.ProjectFindings, full)
 
 	repos := make([]string, 0, len(b.RepoFindings))
 	for repo := range b.RepoFindings {
@@ -416,12 +463,13 @@ func (b *TaskBundle) Render() string {
 	}
 	sort.Strings(repos)
 	for _, repo := range repos {
-		renderSection(&out, "What we know about "+repo, b.RepoFindings[repo], false)
+		renderSection(&out, "What we know about "+repo, b.RepoFindings[repo], full)
 	}
+	renderSubjects(&out, b.SubjectFindings)
 	renderElsewhere(&out, b.ElsewhereFindings)
 
 	if len(b.Unconsolidated) == 0 && len(b.ProjectFindings) == 0 && len(b.RepoFindings) == 0 &&
-		len(b.ElsewhereFindings) == 0 {
+		len(b.SubjectFindings) == 0 && len(b.ElsewhereFindings) == 0 {
 		out.WriteString("\n## Nothing recorded yet\n\n" +
 			"This project has no findings. That is expected on the first task in a project — " +
 			"the value builds from the second one onward. Log what you learn as you go.\n")
@@ -453,6 +501,12 @@ func (b *ProjectBundle) Render() string {
 	if len(b.Project.Repos) > 0 {
 		fmt.Fprintf(&out, "- repos: %s\n", strings.Join(b.Project.Repos, ", "))
 	}
+	if len(b.Project.Environments) > 0 {
+		fmt.Fprintf(&out, "- environments: %s\n", strings.Join(b.Project.Environments, ", "))
+	}
+	if len(b.Project.Services) > 0 {
+		fmt.Fprintf(&out, "- services: %s\n", strings.Join(b.Project.Services, ", "))
+	}
 	if len(b.Project.ConfluenceSpaces) > 0 {
 		fmt.Fprintf(&out, "- wiki spaces: %s\n", strings.Join(b.Project.ConfluenceSpaces, ", "))
 	}
@@ -463,12 +517,12 @@ func (b *ProjectBundle) Render() string {
 		out.WriteString("\n")
 	}
 
-	renderSection(&out, "What we know about this project", b.Findings, false)
+	renderSection(&out, "What we know about this project", b.Findings, full)
 
 	if n := len(b.Findings); n >= consolidationNudge && strings.TrimSpace(stripEmptySections(b.ProjectBody)) == "" {
 		fmt.Fprintf(&out, "\n> %d project findings and nothing in the note body: this project reads "+
-			"as empty in the vault. Consolidate it with target_id `%s`, and each repository "+
-			"separately with repo set.\n", n, b.Project.ID)
+			"as empty in the vault. Consolidate it with target_id `%s`, and each repository, "+
+			"environment and service separately with repo, environment or service set.\n", n, b.Project.ID)
 	}
 
 	repos := make([]string, 0, len(b.RepoNotes))
@@ -477,8 +531,9 @@ func (b *ProjectBundle) Render() string {
 	}
 	sort.Strings(repos)
 	for _, repo := range repos {
-		renderSection(&out, "What we know about "+repo, b.RepoNotes[repo], false)
+		renderSection(&out, "What we know about "+repo, b.RepoNotes[repo], full)
 	}
+	renderSubjects(&out, b.SubjectNotes)
 	renderElsewhere(&out, b.ElsewhereNotes)
 
 	if len(b.OpenTasks) > 0 {
@@ -503,27 +558,82 @@ func (b *ProjectBundle) Render() string {
 	return out.String()
 }
 
-// renderElsewhere renders what other projects know about a bundle's repos, one
-// section per repo, each entry marked with the project it came from.
-func renderElsewhere(out *strings.Builder, byRepo map[string][]Marked) {
-	repos := make([]string, 0, len(byRepo))
-	for repo := range byRepo {
-		repos = append(repos, repo)
+// sectionStyle says how renderSection shows each entry.
+type sectionStyle int
+
+const (
+	// full shows an entry's whole body.
+	full sectionStyle = iota
+	// withKind is full, prefixed by the entry's kind.
+	withKind
+	// headline shows the start of an entry's first line only.
+	headline
+)
+
+// headlineRunes is how much of a finding from another project is shown.
+//
+// Rendered in full, findings from elsewhere took one real bundle from 14 KB to
+// 107 KB: several workstreams' multi-paragraph findings about a shared
+// repository. A headline says what is known and where, and open_project on the
+// project it came from gives the rest to a session that needs it.
+const headlineRunes = 160
+
+// subjectLabel is how a subject is named in a heading. A repository is named
+// alone, as it always was; the others say what they are.
+func subjectLabel(sub store.Subject) string {
+	if sub.Kind == store.ScopeRepo {
+		return sub.ID
 	}
-	sort.Strings(repos)
-	for _, repo := range repos {
-		renderSection(out, "What other projects know about "+repo, byRepo[repo], false)
+	return sub.String()
+}
+
+// sortedSubjects orders subjects by kind, as SubjectKinds lists them, then by
+// id.
+func sortedSubjects(bySubject map[store.Subject][]Marked) []store.Subject {
+	rank := map[string]int{}
+	for i, k := range store.SubjectKinds() {
+		rank[k] = i
 	}
-	if len(repos) > 0 {
-		// Said once, after the sections, where the question comes up.
-		out.WriteString("\nThose were logged by other projects working in the same repositories. " +
-			"\"This project\" in one of them means the project it came from, and a commit or " +
-			"branch it names was current there, then. To replace one that is wrong, log_finding " +
-			"with target_id set to that project and supersedes set to its id.\n")
+	subs := make([]store.Subject, 0, len(bySubject))
+	for sub := range bySubject {
+		subs = append(subs, sub)
+	}
+	sort.Slice(subs, func(i, j int) bool {
+		if subs[i].Kind != subs[j].Kind {
+			return rank[subs[i].Kind] < rank[subs[j].Kind]
+		}
+		return subs[i].ID < subs[j].ID
+	})
+	return subs
+}
+
+// renderSubjects renders the project's own findings about its environments and
+// services, one section per subject.
+func renderSubjects(out *strings.Builder, bySubject map[store.Subject][]Marked) {
+	for _, sub := range sortedSubjects(bySubject) {
+		renderSection(out, "What we know about "+subjectLabel(sub), bySubject[sub], full)
 	}
 }
 
-func renderSection(out *strings.Builder, heading string, items []Marked, showKind bool) {
+// renderElsewhere renders what other projects know about a bundle's subjects,
+// one section per subject, each entry a headline marked with the project it
+// came from.
+func renderElsewhere(out *strings.Builder, bySubject map[store.Subject][]Marked) {
+	subs := sortedSubjects(bySubject)
+	for _, sub := range subs {
+		renderSection(out, "What other projects know about "+subjectLabel(sub), bySubject[sub], headline)
+	}
+	if len(subs) > 0 {
+		// Said once, after the sections, where the question comes up.
+		out.WriteString("\nThose were logged by other projects working with the same repositories, " +
+			"environments or services, and are shown as headlines: open_project on the project named " +
+			"under one gives its full text. \"This project\" in one of them means the project it came " +
+			"from, and a commit or branch it names was current there, then. To replace one that is " +
+			"wrong, log_finding with target_id set to that project and supersedes set to its id.\n")
+	}
+}
+
+func renderSection(out *strings.Builder, heading string, items []Marked, style sectionStyle) {
 	if len(items) == 0 {
 		return
 	}
@@ -531,19 +641,38 @@ func renderSection(out *strings.Builder, heading string, items []Marked, showKin
 	for _, m := range items {
 		e := m.Entry
 		label := ""
-		if showKind {
+		if style == withKind {
 			label = strings.ToUpper(e.Kind[:1]) + e.Kind[1:] + " — "
 		}
-		fmt.Fprintf(out, "- **%s%s**", label, firstLine(e.Body))
-		if rest := remainingLines(e.Body); rest != "" {
-			fmt.Fprintf(out, "\n\n%s\n", indent(rest, "  "))
-		} else {
-			out.WriteString("\n")
+		switch rest := remainingLines(e.Body); {
+		case style == headline:
+			fmt.Fprintf(out, "- **%s**\n", shorten(firstLine(e.Body), headlineRunes))
+		case rest != "":
+			fmt.Fprintf(out, "- **%s%s**\n\n%s\n", label, firstLine(e.Body), indent(rest, "  "))
+		default:
+			fmt.Fprintf(out, "- **%s%s**\n", label, firstLine(e.Body))
 		}
 
 		var meta []string
 		if m.From != "" {
 			meta = append(meta, "from project "+m.From)
+		}
+		if style == headline {
+			// Where it came from and its id are what a headline needs: the
+			// source ref and host were most of the length, and open_project on
+			// the project named here returns them with the full text.
+			meta = append(meta, dateOf(e.TS))
+			if e.Confidence != "" {
+				meta = append(meta, "confidence "+e.Confidence)
+			}
+			if e.Path != "" {
+				meta = append(meta, "id "+e.ID())
+			}
+			fmt.Fprintf(out, "  <sub>%s</sub>\n", strings.Join(meta, " · "))
+			if m.Stale {
+				fmt.Fprintf(out, "  ⚠ **re-verify**: %s\n", m.Reason)
+			}
+			continue
 		}
 		meta = append(meta, e.TS)
 		if e.Source != nil && e.Source.Kind != "" {
@@ -570,6 +699,28 @@ func renderSection(out *strings.Builder, heading string, items []Marked, showKin
 			fmt.Fprintf(out, "  ⚠ **re-verify**: %s\n", m.Reason)
 		}
 	}
+}
+
+// dateOf returns the date part of a timestamp.
+func dateOf(ts string) string {
+	if d, _, ok := strings.Cut(ts, "T"); ok {
+		return d
+	}
+	return ts
+}
+
+// shorten cuts s to at most n runes, at a word boundary where there is one,
+// marking the cut.
+func shorten(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	cut := string(r[:n])
+	if i := strings.LastIndex(cut, " "); i > n/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,;:—-") + " …"
 }
 
 // stripEmptySections removes headings with nothing under them, so a freshly

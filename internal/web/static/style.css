@@ -175,14 +175,18 @@ main.wide { max-width: none; padding: 0; }
 #graph { position: absolute; inset: 0; }
 
 :root {
-  --g-project: #2f6fd0; --g-repo: #8a5cc2; --g-ready: #2e8b57; --g-blocked: #c77800;
-  --g-closed: #a7b0bf; --g-e-repo: #8a5cc2; --g-e-project: #2f6fd0; --g-e-task: #98a2b3;
+  --g-project: #2f6fd0; --g-repo: #8a5cc2; --g-environment: #0f8a8a; --g-service: #c2477a;
+  --g-ready: #2e8b57; --g-blocked: #c77800; --g-closed: #a7b0bf;
+  --g-e-repo: #8a5cc2; --g-e-environment: #0f8a8a; --g-e-service: #c2477a;
+  --g-e-project: #2f6fd0; --g-e-task: #98a2b3;
   --g-edge: #c9d0db;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --g-project: #7abeff; --g-repo: #c29cf0; --g-ready: #6fd49b; --g-blocked: #ffcb7a;
-    --g-closed: #4c5870; --g-e-repo: #c29cf0; --g-e-project: #7abeff; --g-e-task: #6b778c;
+    --g-project: #7abeff; --g-repo: #c29cf0; --g-environment: #5fd3cf; --g-service: #f59ac0;
+    --g-ready: #6fd49b; --g-blocked: #ffcb7a; --g-closed: #4c5870;
+    --g-e-repo: #c29cf0; --g-e-environment: #5fd3cf; --g-e-service: #f59ac0;
+    --g-e-project: #7abeff; --g-e-task: #6b778c;
     --g-edge: #34405a;
   }
 }
@@ -200,11 +204,16 @@ main.wide { max-width: none; padding: 0; }
 .graph-legend div > .lg:first-child { margin-left: 0; }
 .lg-project { background: var(--g-project); width: 13px; height: 13px; }
 .lg-repo { background: var(--g-repo); border-radius: 2px; }
+.lg-environment { background: var(--g-environment); border-radius: 0; width: 12px;
+                  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.lg-service { background: var(--g-service); border-radius: 1px; transform: rotate(45deg) scale(.85); }
 .lg-task-ready { background: var(--g-ready); }
 .lg-task-blocked { background: var(--g-blocked); }
 .lg-task-closed { background: var(--g-closed); }
 .lg-warn { background: color-mix(in srgb, var(--warn) 40%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 30%, transparent); }
 .lg-entry-repo { background: var(--g-e-repo); width: 7px; height: 7px; }
+.lg-entry-environment { background: var(--g-e-environment); width: 7px; height: 7px; }
+.lg-entry-service { background: var(--g-e-service); width: 7px; height: 7px; }
 .lg-entry-project { background: var(--g-e-project); width: 7px; height: 7px; }
 .lg-entry-task { background: var(--g-e-task); width: 7px; height: 7px; }
 .ll { display: inline-block; width: 22px; height: 0; margin: 0 .35rem 0 .5rem; vertical-align: middle;

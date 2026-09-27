@@ -85,8 +85,9 @@ func (s *Server) handleGraphNode(w http.ResponseWriter, r *http.Request) {
 		name, data, err = projectDetail(st, cfg, project)
 	case nodeTask:
 		name, data, err = taskDetail(st, cfg, project, q.Get("task"))
-	case nodeRepo:
-		name, data, err = repoDetail(st, cfg, q.Get("repo"))
+	case nodeRepo, nodeEnvironment, nodeService:
+		kind := q.Get("kind")
+		name, data, err = subjectDetail(st, cfg, store.Subject{Kind: kind, ID: q.Get(kind)})
 	case nodeEntry:
 		name, data, err = entryDetail(st, cfg, project, q.Get("file"))
 	default:
@@ -254,8 +255,19 @@ func taskDetail(st *store.Store, cfg *config.Config, project, id string) (string
 	}, nil
 }
 
-func repoDetail(st *store.Store, cfg *config.Config, repo string) (string, map[string]any, error) {
-	if err := store.ValidateRepo(repo); err != nil {
+// subjectNouns name each subject kind the way a heading says it.
+var subjectNouns = map[string]string{
+	store.ScopeRepo:        "repository",
+	store.ScopeEnvironment: "environment",
+	store.ScopeService:     "service",
+}
+
+// subjectDetail is the panel for a repo, an environment or a service.
+//
+// The id arrives from a URL and becomes a file name on the way to the subject's
+// page, so it is validated before anything reads the vault with it.
+func subjectDetail(st *store.Store, cfg *config.Config, sub store.Subject) (string, map[string]any, error) {
+	if err := store.ValidateSubject(sub.Kind, sub.ID); err != nil {
 		return "", nil, fmt.Errorf("%w: %v", errBadRequest, err)
 	}
 	ids, err := st.ListProjects()
@@ -263,14 +275,20 @@ func repoDetail(st *store.Store, cfg *config.Config, repo string) (string, map[s
 		return "", nil, err
 	}
 
-	// One row per project that touches the repository, since knowledge about
-	// a repo is kept per project and this is the one place it is seen whole.
+	// One row per project that touches the subject, since knowledge about one
+	// is kept per project and this is the one place it is seen whole.
 	type projectRow struct {
 		Project      string
 		Listed       bool
 		Consolidated bool
 		Findings     int
 		Tasks        []string
+	}
+	// A repo is mentioned by any entry naming it; the other kinds only by the
+	// entries scoped to them, which is all that can name them.
+	filter := store.EntryFilter{Scope: sub.Kind, Subjects: []string{sub.ID}}
+	if sub.Kind == store.ScopeRepo {
+		filter = store.EntryFilter{Repos: []string{sub.ID}}
 	}
 	var rows []projectRow
 	var findings []*store.Entry
@@ -280,30 +298,32 @@ func repoDetail(st *store.Store, cfg *config.Config, repo string) (string, map[s
 			continue
 		}
 		row := projectRow{Project: pid}
-		for _, r := range note.Repos {
-			if strings.EqualFold(r, repo) {
+		for _, r := range note.SubjectsOf(sub.Kind) {
+			if strings.EqualFold(r, sub.ID) {
 				row.Listed = true
 			}
 		}
-		if _, body, err := st.ReadRepoNote(pid, repo); err == nil && hasContent(body) {
-			row.Consolidated = true
-		}
-		taskIDs, err := st.ListTasks(pid)
-		if err != nil {
-			return "", nil, err
-		}
-		for _, t := range taskIDs {
-			tn, _, err := st.ReadTask(pid, t)
+		row.Consolidated = subjectHasBody(st, pid, sub)
+		// Only a task note lists repos; for the other kinds the tasks come
+		// from the entries alone.
+		if sub.Kind == store.ScopeRepo {
+			taskIDs, err := st.ListTasks(pid)
 			if err != nil {
-				continue
+				return "", nil, err
 			}
-			for _, r := range tn.Repos {
-				if strings.EqualFold(r, repo) {
-					row.Tasks = appendUnique(row.Tasks, t)
+			for _, t := range taskIDs {
+				tn, _, err := st.ReadTask(pid, t)
+				if err != nil {
+					continue
+				}
+				for _, r := range tn.Repos {
+					if strings.EqualFold(r, sub.ID) {
+						row.Tasks = appendUnique(row.Tasks, t)
+					}
 				}
 			}
 		}
-		entries, err := st.Entries(pid, store.EntryFilter{Repos: []string{repo}})
+		entries, err := st.Entries(pid, filter)
 		if err != nil {
 			return "", nil, err
 		}
@@ -311,7 +331,7 @@ func repoDetail(st *store.Store, cfg *config.Config, repo string) (string, map[s
 			if e.Task != "" {
 				row.Tasks = appendUnique(row.Tasks, e.Task)
 			}
-			if e.Kind == store.KindFinding && e.Scope == store.ScopeRepo {
+			if e.Kind == store.KindFinding && e.Scope == sub.Kind {
 				row.Findings++
 				findings = append(findings, e)
 			}
@@ -322,7 +342,7 @@ func repoDetail(st *store.Store, cfg *config.Config, repo string) (string, map[s
 		}
 	}
 	if len(rows) == 0 {
-		return "", nil, fmt.Errorf("no project mentions %q", repo)
+		return "", nil, fmt.Errorf("no project mentions %q", sub.ID)
 	}
 
 	sort.SliceStable(findings, func(i, j int) bool { return findings[i].Time().Before(findings[j].Time()) })
@@ -330,19 +350,34 @@ func repoDetail(st *store.Store, cfg *config.Config, repo string) (string, map[s
 	var issues []store.Issue
 	if all, err := st.Check(); err == nil {
 		for _, i := range all {
-			if strings.EqualFold(i.Subject, repo) {
+			if strings.EqualFold(i.Subject, sub.ID) {
 				issues = append(issues, i)
 			}
 		}
 	}
 
-	return "detail-repo", map[string]any{
-		"Repo":     repo,
+	return "detail-subject", map[string]any{
+		"Kind":     sub.Kind,
+		"Noun":     subjectNouns[sub.Kind],
+		"ID":       sub.ID,
 		"Projects": rows,
 		"Findings": len(findings),
 		"Issues":   issues,
 		"Recent":   decorate(newestFirst(findings, detailEntries), cfg.Stale.MaxAgeDays),
 	}, nil
+}
+
+// subjectHasBody reports whether a project's page about a subject has been
+// consolidated into something worth reading.
+func subjectHasBody(st *store.Store, project string, sub store.Subject) bool {
+	var body string
+	var err error
+	if sub.Kind == store.ScopeRepo {
+		_, body, err = st.ReadRepoNote(project, sub.ID)
+	} else {
+		_, body, err = st.ReadSubjectNote(project, sub)
+	}
+	return err == nil && hasContent(body)
 }
 
 func entryDetail(st *store.Store, cfg *config.Config, project, file string) (string, map[string]any, error) {

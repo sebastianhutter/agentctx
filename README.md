@@ -4,9 +4,10 @@ Durable, agent-writable knowledge for work that spans repositories and trackers.
 
 Agents log **decisions** and **findings** while they work, each with provenance,
 into a dedicated Obsidian vault. Entries are append-only markdown files. Findings
-are scoped `task`, `repo` or `project` — and the repo- and project-scoped ones are
-the point: they outlive the task that discovered them, so the next piece of work
-in the same repository starts with what the last one found out.
+are scoped `task`, `repo`, `environment`, `service` or `project` — and everything
+but `task` is the point: it outlives the task that discovered it, so the next
+piece of work in the same repository, environment or service starts with what
+the last one found out, even when it belongs to another project.
 
 It is **not** a task tracker, an aggregator or an integration hub.
 
@@ -120,8 +121,8 @@ than from detection. Task ids are required either way.
 vault checks, and a log view filterable by project, task, kind, scope, host and
 repo. Opened from the menu bar, or run on its own with `agentctx web`.
 
-- **Graph** (`/graph`) draws projects, tasks, repositories and, optionally, log
-  entries as one picture. A repository is one node however many projects work on
+- **Graph** (`/graph`) draws projects, tasks, repositories, environments,
+  services and, optionally, log entries as one picture. A repository is one node however many projects work on
   it, so the repos that tie projects together are visible — Obsidian's graph has
   a note per project for the same repo and cannot show that. Task colour is
   ready/blocked/closed, arrows are dependencies, and a dashed line is a repo a
