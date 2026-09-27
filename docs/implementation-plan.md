@@ -399,6 +399,14 @@ Still open:
   decide, so it waits for the trial.
 - **Retention** for closed tasks — leave everything and let retrieval sort it out,
   or compact? A non-problem until it is one.
+- **Does the second task cost less?** It is the design's central claim and
+  nothing measures it. Asking the agent to estimate its tokens at `close_task`
+  would give a number no agent can see, and a task spans sessions no single
+  agent sees whole — a guess, which D9 already says not to trust. If it is
+  measured, it is measured: the host's own transcripts carry exact usage, a
+  `SessionEnd` hook could pass it to the CLI as one entry per session, and the
+  total is folded on read. agentctx can also count its own share exactly — the
+  size of every bundle it returns.
 - **Write-back to the tracker** — under D4, agentctx cannot. If a Jira comment
   summarising a decision is ever wanted, the agent does it with its own Jira MCP.
   Probably the right split; worth revisiting only if it is missed.
@@ -804,15 +812,19 @@ the project folders is the cleaner end state, but it changes the vault layout
 and the one-parent link scheme, and it is not yet clear the split pages hurt
 once the bundles show both halves. Decided after this has been used, not before.
 
-**Not bounded yet.** A repository with many findings elsewhere makes a long
-bundle. The first repository in the audit had eighteen. If that proves too
-much, the cut is by date, newest first, with a count of what was left out —
-never silently.
+**Bounded as headlines.** A repository with many findings elsewhere made a
+long bundle — the first in the audit had eighteen, and one bundle grew from
+14 KB to 107 KB. Findings from other projects are therefore shown as their
+first 160 characters (§16). If even that proves too much, the next cut is by
+date, newest first, with a count of what was left out — never silently.
 
 
 ---
 
 ## 16. More subjects than repositories
+
+Status: **built** (2026-09-27), ahead of the trial §15 was waiting for — see the
+end of this section for what was settled while building it.
 
 Asked while designing §15: should findings attach to more than repositories —
 an **environment** (the staging and production accounts), a **service** (a SaaS
@@ -839,9 +851,37 @@ The test a new kind has to pass is the one repositories pass:
   into a link collection, and the vault is already indexed by a retrieval tool
   that reads those pages.
 
-The shape, when it is built: one mechanism, not one per kind. `repo` becomes one
-case of a *subject* with a kind and an id, each kind declaring whether its id is
-global (read across projects, as in §15) or project-local. The open question is
-the third test: nothing hands a task its environments the way a workspace hands
-it repositories. Either the project declares them through `amend`, or they are
-folded out of what the task has already logged.
+The shape: one mechanism, not one per kind. `repo` is one case of a
+`store.Subject` with a kind and an id; `environment` and `service` are two more
+scopes, each with a field of its own on the entry (`environment:`,
+`service:`) so the files still read plainly in Obsidian and filter plainly in
+Bases.
+
+Settled while building it:
+
+- **Every subject id is global.** The first draft above made environments
+  project-local because every project has a `prod`. The audit says otherwise:
+  projects are workstreams, and five of them shared one organisation's staging
+  account. So the id carries its owner instead — `acme/production`, enforced on
+  write — and environments read across projects exactly as repositories do. A
+  service is `idp` for the product or `acme/idp` for one
+  organisation's instance; both read across projects, and the "from project"
+  marker says whose finding it was.
+- **Relevance, the third test: listed or logged.** A project lists its
+  environments and services (`environments:` / `services:` on the note, changed
+  by `amend_project`), and a bundle covers those plus any the project's own log
+  has findings about. Listing is what brings in other projects' knowledge before
+  anything is logged here; the log is what keeps a finding under an unlisted
+  subject from disappearing. Every task in the project gets them, as it gets
+  project-scoped findings — nothing hands a task its environments.
+- **A subject is set with its own scope, and only then.** `environment` given
+  with `scope: task` is refused, not re-scoped: the agent meant the finding to
+  outlive the task, and the task-scoped default would lose it silently.
+- **Pages per kind**, `notes/environments/` and `notes/services/`, so
+  `acme/production` the environment and a repository of the same name cannot
+  share a file. Repository pages stay where they were. Entries link to theirs
+  through `subject_note`, so `repo_note` still means repositories.
+- **Findings from elsewhere are headlines.** The size problem §15 left open was
+  real: rendered in full, one bundle went from 14 KB to 107 KB. They now show
+  their first 160 characters, and `open_project` on the project named under
+  one gives the whole text.

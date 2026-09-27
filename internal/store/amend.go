@@ -9,11 +9,12 @@ import (
 // ReadProject reads a project note and folds in the amendments recorded in its
 // log.
 //
-// A project's repos and tracker keys are set when it is created and change as
-// work finds more of them. The change is an amend entry in the log rather
-// than an edit to the note, for the same reasons dependencies are: an agent
-// never rewrites a shared file on a synced vault, every change keeps who made
-// it, when and why, and a wrong one is undone by another entry. The note's
+// A project's repos, tracker keys, environments and services are set when it
+// is created and change as work finds more of them. The change is an amend
+// entry in the log rather than an edit to the note, for the same reasons
+// dependencies are: an agent never rewrites a shared file on a synced vault,
+// every change keeps who made it, when and why, and a wrong one is undone by
+// another entry. The note's
 // own lists stay what they were at creation, or what a person set by hand in
 // Obsidian; this is what everything else reads.
 //
@@ -35,6 +36,10 @@ func (s *Store) ReadProject(id string) (*ProjectNote, string, error) {
 		note.Repos = removeFold(note.Repos, e.RemoveRepos...)
 		note.JiraProjects = addFold(note.JiraProjects, e.AddKeys...)
 		note.JiraProjects = removeFold(note.JiraProjects, e.RemoveKeys...)
+		note.Environments = addFold(note.Environments, e.AddEnvironments...)
+		note.Environments = removeFold(note.Environments, e.RemoveEnvironments...)
+		note.Services = addFold(note.Services, e.AddServices...)
+		note.Services = removeFold(note.Services, e.RemoveServices...)
 	}
 	return note, body, nil
 }

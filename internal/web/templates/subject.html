@@ -1,0 +1,17 @@
+{{template "layout" .}}
+{{define "title"}}{{.ID}} — agentctx{{end}}
+{{define "content"}}
+<p class="crumb"><a href="/project/{{.ProjectID}}">{{.ProjectID}}</a> / {{.Kind}}</p>
+<h1>{{.ID}}</h1>
+<p class="muted">What we know about this {{.Noun}}, across every task that touched it.</p>
+
+{{if .HasBody}}
+  <section class="note">{{.Body}}</section>
+{{else}}
+  <p class="nudge">No consolidated note for this {{.Noun}} yet. It is what the next task working
+  with it reads first.</p>
+{{end}}
+
+<h2>{{.Kind}}-scoped findings</h2>
+{{template "entrylist" .Findings}}
+{{end}}

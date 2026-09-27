@@ -4,9 +4,9 @@
 
 A durable, agent-writable knowledge layer over a dedicated Obsidian vault. Agents
 log **decisions** and **findings** during the work, each with provenance; entries
-are append-only markdown files. Findings are scoped `task`, `repo` or `project`,
-and the repo- and project-scoped ones are the point — they outlive the task that
-discovered them.
+are append-only markdown files. Findings are scoped `task`, `repo`,
+`environment`, `service` or `project`, and all but the task-scoped ones are the
+point — they outlive the task that discovered them.
 
 Not a task tracker, not an aggregator, not an integration hub.
 

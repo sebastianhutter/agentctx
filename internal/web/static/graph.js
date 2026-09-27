@@ -1,5 +1,6 @@
-// The graph page: projects, tasks, repositories and log entries as one picture,
-// with a side panel that shows everything known about whatever is clicked.
+// The graph page: projects, tasks, the repositories, environments and services
+// they work on, and log entries as one picture, with a side panel that shows
+// everything known about whatever is clicked.
 //
 // Drawn with Cytoscape.js (vendored under static/vendor, see LICENSES.txt).
 // Two layouts: projects as clusters (fcose, which understands compound nodes)
@@ -20,10 +21,16 @@
   const css = getComputedStyle(document.documentElement);
   const c = (name) => css.getPropertyValue(name).trim();
   const colour = {
-    project: c("--g-project"), repo: c("--g-repo"), ready: c("--g-ready"), blocked: c("--g-blocked"),
-    closed: c("--g-closed"), eRepo: c("--g-e-repo"), eProject: c("--g-e-project"), eTask: c("--g-e-task"),
+    project: c("--g-project"), repo: c("--g-repo"), environment: c("--g-environment"), service: c("--g-service"),
+    ready: c("--g-ready"), blocked: c("--g-blocked"), closed: c("--g-closed"),
+    eRepo: c("--g-e-repo"), eEnvironment: c("--g-e-environment"), eService: c("--g-e-service"),
+    eProject: c("--g-e-project"), eTask: c("--g-e-task"),
     edge: c("--g-edge"), ink: c("--ink"), muted: c("--muted"), bg: c("--bg"), warn: c("--warn"),
   };
+
+  // The node kinds findings accumulate about. Each is also the name of its
+  // query parameter on /log and /graph/node, and the prefix of its node id.
+  const SUBJECTS = new Set(["repo", "environment", "service"]);
 
   let data = { nodes: [], edges: [] };
   let focus = null; // node id whose neighbourhood alone is shown
@@ -67,12 +74,24 @@
         shape: "round-rectangle", "background-color": colour.repo, color: colour.ink,
         width: "mapData(weight, 0, 30, 20, 48)", height: "mapData(weight, 0, 30, 20, 48)",
       } },
-      { selector: "node[kind='repo'][state^='shared']", style: { "border-color": colour.ink, "border-width": 3 } },
-      { selector: "node[kind='repo'][state$='unconsolidated']", style: { "background-opacity": 0.5 } },
+      { selector: "node[kind='environment']", style: {
+        shape: "hexagon", "background-color": colour.environment, color: colour.ink,
+        width: "mapData(weight, 0, 30, 22, 50)", height: "mapData(weight, 0, 30, 20, 46)",
+      } },
+      { selector: "node[kind='service']", style: {
+        shape: "round-diamond", "background-color": colour.service, color: colour.ink,
+        width: "mapData(weight, 0, 30, 22, 50)", height: "mapData(weight, 0, 30, 22, 50)",
+      } },
+      { selector: "node[kind='repo'][state^='shared'], node[kind='environment'][state^='shared'], node[kind='service'][state^='shared']",
+        style: { "border-color": colour.ink, "border-width": 3 } },
+      { selector: "node[kind='repo'][state$='unconsolidated'], node[kind='environment'][state$='unconsolidated'], node[kind='service'][state$='unconsolidated']",
+        style: { "background-opacity": 0.5 } },
       { selector: "node[kind='entry']", style: {
         width: 9, height: 9, label: "", "border-width": 0.8, "background-color": colour.eTask,
       } },
       { selector: "node[kind='entry'][state='repo']", style: { "background-color": colour.eRepo } },
+      { selector: "node[kind='entry'][state='environment']", style: { "background-color": colour.eEnvironment } },
+      { selector: "node[kind='entry'][state='service']", style: { "background-color": colour.eService } },
       { selector: "node[kind='entry'][state='project']", style: { "background-color": colour.eProject } },
       { selector: "node[kind='entry'][label='decision']", style: { shape: "diamond", width: 11, height: 11 } },
       { selector: "node[kind='entry'][label='note']", style: { shape: "round-rectangle" } },
@@ -231,6 +250,8 @@
     const warn = cy.nodes("[warn > 0]").length;
     ui.count.textContent =
       `${k("project")} projects · ${k("task")} tasks · ${k("repo")} repos` +
+      (k("environment") ? ` · ${k("environment")} environments` : "") +
+      (k("service") ? ` · ${k("service")} services` : "") +
       (k("entry") ? ` · ${k("entry")} entries` : "") +
       (warn ? ` · ${warn} with warnings` : "") +
       (focus ? " · focused (double-click the background to clear)" : "");
@@ -271,7 +292,7 @@
     const sub = n.kind !== "entry" && n.title && n.title !== n.label ? n.title : "";
     let html = `<div class="tip-kind">${esc(kind)}</div><div class="tip-title">${esc(title || "")}</div>`;
     if (sub) html += `<div>${esc(sub)}</div>`;
-    if (n.kind === "repo" && n.detail) html += `<div class="muted">${esc(n.detail)}</div>`;
+    if (SUBJECTS.has(n.kind) && n.detail) html += `<div class="muted">${esc(n.detail)}</div>`;
     if (n.warn) html += `<div class="warn">${n.warn} warning${n.warn > 1 ? "s" : ""}, see the panel</div>`;
     ui.tip.innerHTML = html;
     ui.tip.hidden = false;
@@ -292,9 +313,9 @@
 
   function detailURL(n) {
     const q = new URLSearchParams({ kind: n.kind });
-    if (n.kind !== "repo") q.set("project", n.project);
+    if (!SUBJECTS.has(n.kind)) q.set("project", n.project);
     if (n.kind === "task") q.set("task", n.label);
-    if (n.kind === "repo") q.set("repo", n.label);
+    if (SUBJECTS.has(n.kind)) q.set(n.kind, n.label);
     if (n.kind === "entry") q.set("file", n.file);
     return "/graph/node?" + q;
   }
@@ -326,7 +347,8 @@
     const a = ev.target.closest("a[data-node]");
     if (!a || ev.metaKey || ev.ctrlKey) return;
     let id = a.dataset.node;
-    if (id.startsWith("repo:")) id = id.toLowerCase();
+    // Subject ids are case-folded in the graph; a panel link carries the name as written.
+    if (SUBJECTS.has(id.slice(0, id.indexOf(":")))) id = id.toLowerCase();
     const node = cy.getElementById(id);
     if (node.empty()) return; // filtered out of the picture: follow the link
     ev.preventDefault();

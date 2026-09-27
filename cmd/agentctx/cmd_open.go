@@ -20,6 +20,8 @@ var (
 	openJiraKeys    []string
 	openGitLabGroup []string
 	openRepos       []string
+	openEnvs        []string
+	openServices    []string
 	openSpaces      []string
 )
 
@@ -68,8 +70,8 @@ when you know it.`,
 var openProjectCmd = &cobra.Command{
 	Use:   "open-project <project-id>",
 	Short: "Print what is known about a project, creating it if asked",
-	Long: `Print the project bundle: project-scoped findings, per-repository findings and
-the open tasks.
+	Long: `Print the project bundle: project-scoped findings, findings per repository,
+environment and service, and the open tasks.
 
 Creating a project needs --name and the tracker keys or repos that belong to it:
 that mapping is what lets a later open-task resolve PROJ-142 to this project, and
@@ -84,7 +86,8 @@ it cannot be guessed.`,
 		b, err := svc.OpenProject(service.OpenProjectRequest{
 			ID: args[0], Name: openProjectName,
 			JiraProjects: openJiraKeys, GitLabGroups: openGitLabGroup,
-			Repos: openRepos, ConfluenceSpaces: openSpaces,
+			Repos: openRepos, Environments: openEnvs, Services: openServices,
+			ConfluenceSpaces: openSpaces,
 		})
 		if err != nil {
 			return err
@@ -107,6 +110,8 @@ func init() {
 	openProjectCmd.Flags().StringSliceVar(&openJiraKeys, "jira-project", nil, "Tracker project key (repeatable)")
 	openProjectCmd.Flags().StringSliceVar(&openGitLabGroup, "gitlab-group", nil, "GitLab group (repeatable)")
 	openProjectCmd.Flags().StringSliceVar(&openRepos, "repo", nil, "Repository owned by this project (repeatable)")
+	openProjectCmd.Flags().StringSliceVar(&openEnvs, "environment", nil, "Environment the project works with, owner/name (repeatable)")
+	openProjectCmd.Flags().StringSliceVar(&openServices, "service", nil, "Service the project depends on (repeatable)")
 	openProjectCmd.Flags().StringSliceVar(&openSpaces, "confluence-space", nil, "Wiki space (repeatable)")
 
 	rootCmd.AddCommand(openTaskCmd, openProjectCmd)

@@ -21,6 +21,8 @@ var (
 	findingDate     string
 	findingScope    string
 	findingRepo     string
+	findingEnv      string
+	findingService  string
 	findingConf     string
 	findingTargetID string
 	supersedes      []string
@@ -52,8 +54,8 @@ var logFindingCmd = &cobra.Command{
 	Short: "Record something looked up and confirmed",
 	Long: `Record a finding with its provenance.
 
---scope is the argument that matters: repo and project outlive the task, task
-does not. Confidence is derived from --source-kind; --confidence can only lower
+--scope is the argument that matters: repo, environment, service and project
+outlive the task, task does not. Confidence is derived from --source-kind; --confidence can only lower
 it.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		svc, err := newService()
@@ -63,7 +65,8 @@ it.`,
 		entry, err := svc.LogFinding(service.LogFindingRequest{
 			TargetID: findingTargetID, Finding: findingText,
 			Source: store.Source{Kind: findingKind, Ref: findingRef, Retrieved: findingDate},
-			Scope:  findingScope, Repo: findingRepo, Confidence: findingConf,
+			Scope:  findingScope, Repo: findingRepo, Environment: findingEnv, Service: findingService,
+			Confidence: findingConf,
 			Supersedes: supersedes,
 		})
 		if err != nil {
@@ -93,8 +96,10 @@ func init() {
 	logFindingCmd.Flags().StringVar(&findingKind, "source-kind", "", "file | merge-request | issue | document | confluence | web | slack | conversation | inferred (required)")
 	logFindingCmd.Flags().StringVar(&findingRef, "source-ref", "", "Pointer into the source, e.g. path@commit")
 	logFindingCmd.Flags().StringVar(&findingDate, "retrieved", "", "Retrieval date YYYY-MM-DD (default today)")
-	logFindingCmd.Flags().StringVar(&findingScope, "scope", "", "task | repo | project (default task)")
+	logFindingCmd.Flags().StringVar(&findingScope, "scope", "", "task | repo | environment | service | project (default task)")
 	logFindingCmd.Flags().StringVar(&findingRepo, "repo", "", "Repository the finding is about (required with --scope repo)")
+	logFindingCmd.Flags().StringVar(&findingEnv, "environment", "", "Environment the finding is about, owner/name (required with --scope environment)")
+	logFindingCmd.Flags().StringVar(&findingService, "service", "", "Service the finding is about (required with --scope service)")
 	logFindingCmd.Flags().StringVar(&findingConf, "confidence", "", "high | medium | low — only honoured when lower than derived")
 	logFindingCmd.Flags().StringSliceVar(&supersedes, "supersedes", nil, "Id of an entry this one replaces (repeatable)")
 	logFindingCmd.Flags().StringVar(&findingTargetID, "target", "", "Task or project id (default: the bound task)")

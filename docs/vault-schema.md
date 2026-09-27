@@ -15,6 +15,10 @@ Names below are placeholders — see Rule 0 in `CLAUDE.md`.
     proj.md                                         project note
     notes/
       acme-infrastructure.md                        consolidated per-repo knowledge
+      environments/
+        acme-production.md                          consolidated per-environment knowledge
+      services/
+        idp.md                                      consolidated per-service knowledge
       conventions.md
     tasks/
       proj-142.md                                   one per task
@@ -34,8 +38,10 @@ The only thing an agent writes. One file per entry, never edited, never deleted.
 kind: finding                  # opened | decision | finding | dependency | closed | note
 task: proj-142                 # absent on a project-scoped entry with no task
 project: proj
-scope: repo                    # task | repo | project
+scope: repo                    # task | repo | environment | service | project
 repo: acme/infrastructure      # required when scope is repo
+# environment: acme/production # required when scope is environment, and only then
+# service: idp             # required when scope is service, and only then
 ts: 2026-09-19T14:32:07
 host: kepler-claude-code
 session: 077cbc02-…            # host session id, when the host exposes one
@@ -46,6 +52,7 @@ source:                        # required on findings
 confidence: high               # derived from source.kind
 parent: '[[proj/tasks/proj-142|proj-142]]'   # see Links; the project note when there is no task
 repo_note: '[[proj/notes/acme-infrastructure|acme/infrastructure]]'  # when that note exists
+# subject_note: the same for an environment's or a service's page
 supersedes:                    # optional: ids of entries this one replaces
     - 2026-09-18T0910-proj-142-finding-7c1e
 ---
@@ -91,15 +98,29 @@ The field the system turns on.
 |---|---|---|
 | `task` | true only of this piece of work | no |
 | `repo` | true about a repository, for whoever works on it next | yes |
+| `environment` | true about a deployment environment — an account, a cluster, a stage | yes |
+| `service` | true about a service the work depends on — a SaaS product, or an instance of one | yes |
 | `project` | true about the project as a whole | yes |
 
 A finding that would help someone who has never heard of the task is not
 task-scoped. When in doubt, the wider scope is the better guess.
 
-A repo-scoped finding is written to the project whose task found it, but read
-by every project that works in the repository: `open_task` and `open_project`
-show other projects' findings about the same repos under their own heading,
-marked with the project they came from.
+Repositories, environments and services are **subjects**: each is named by an
+id that means one thing wherever it is logged. `acme/infrastructure` is one
+repository. An environment id always carries its owner — `acme/production`,
+never `production`, since every organisation has one. A service is named by
+the product, `idp`, or by an organisation's instance of it,
+`acme/idp`. An environment records what was *learned* about it (a policy, a
+limit), never an inventory of what runs there: that is live state, and it goes
+stale the moment it is stored.
+
+A subject-scoped finding is written to the project whose task found it, but
+read by every project that works with the same subject: `open_task` and
+`open_project` show other projects' findings about it under their own heading,
+as headlines marked with the project they came from. Which subjects a bundle
+covers: for repositories, the task's (or, for a project bundle, the
+project's); for environments and services, the ones the project lists plus any
+its own log has findings about.
 
 ### Confidence
 
@@ -220,6 +241,10 @@ gitlab_groups:
     - acme
 repos:
     - acme/infrastructure
+environments:                  # owner/name
+    - acme/production
+services:
+    - idp
 confluence_spaces:
     - PROJ
 created: 2026-09-19
@@ -233,8 +258,8 @@ why a project is never created implicitly.
 
 ### Amending a project
 
-What belongs to a project is found out as the work goes, so `repos` and
-`jira_projects` change after creation — by an **amend entry** in the log, not an
+What belongs to a project is found out as the work goes, so `repos`,
+`jira_projects`, `environments` and `services` change after creation — by an **amend entry** in the log, not an
 edit to the note:
 
 ```yaml
@@ -246,7 +271,8 @@ ts: 2026-09-25T16:40:00
 host: kepler-claude-code
 add_repos: [acme/tools]
 add_tracker_keys: [PROJ]
-# remove_repos, remove_tracker_keys likewise
+# remove_repos, remove_tracker_keys likewise; add_environments,
+# remove_environments, add_services, remove_services for the others
 ---
 
 Tasks PROJ-1 and PROJ-2 were opened here with project passed explicitly.
@@ -269,17 +295,22 @@ another project's id, or that no task in this project uses yet — the last one
 catches a typo before it takes effect. `open_task` lists what the task shows
 its project is missing under **Project gaps**, with the call that closes it.
 
+An environment or a service costs what a repo costs. Listing one is worth doing
+before anything is logged about it here: it is what brings other projects'
+findings about it into this project's bundles.
+
 ## Links
 
-The ids in `task`, `project` and `repo` are what agentctx reads. Beside them,
+The ids in `task`, `project`, `repo`, `environment` and `service` are what
+agentctx reads. Beside them,
 every file carries the same relation as a link, so Obsidian's graph and anything
 indexing the vault can follow it:
 
-| File | `parent` | `repo_note` |
+| File | `parent` | `repo_note` / `subject_note` |
 |---|---|---|
-| log entry with a task | its task note | its repo note, if the entry has a repo and the note exists |
+| log entry with a task | its task note | its repo note, if the entry has a repo and the note exists; `subject_note` likewise for an environment's or a service's page |
 | log entry without a task | the project note | as above |
-| task note, repo note | the project note | — |
+| task note, repo, environment or service page | the project note | — |
 
 One parent per file, not a link to every ancestor: the project note is linked by
 its tasks and its project-scoped entries, not by every entry of every task.

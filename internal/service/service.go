@@ -248,6 +248,8 @@ type OpenProjectRequest struct {
 	JiraProjects     []string
 	GitLabGroups     []string
 	Repos            []string
+	Environments     []string
+	Services         []string
 	ConfluenceSpaces []string
 }
 
@@ -272,10 +274,21 @@ func (s *Service) OpenProject(req OpenProjectRequest) (*bundle.ProjectBundle, er
 			return nil, fmt.Errorf("project %q does not exist yet: to create it, pass at least name "+
 				"and the tracker keys or repos that belong to it", id)
 		}
+		for _, sub := range []struct {
+			kind string
+			ids  []string
+		}{{store.ScopeEnvironment, req.Environments}, {store.ScopeService, req.Services}} {
+			for _, sid := range sub.ids {
+				if err := store.ValidateSubject(sub.kind, sid); err != nil {
+					return nil, err
+				}
+			}
+		}
 		note := &store.ProjectNote{
 			ID: id, Name: req.Name,
 			JiraProjects: req.JiraProjects, GitLabGroups: req.GitLabGroups,
-			Repos: req.Repos, ConfluenceSpaces: req.ConfluenceSpaces,
+			Repos: req.Repos, Environments: clean(req.Environments), Services: clean(req.Services),
+			ConfluenceSpaces: req.ConfluenceSpaces,
 		}
 		if err := s.Store.CreateProject(note); err != nil {
 			return nil, err
@@ -485,12 +498,15 @@ func (s *Service) LogDecision(req LogDecisionRequest) (*store.Entry, error) {
 
 // LogFindingRequest records something looked up and confirmed.
 type LogFindingRequest struct {
-	TargetID   string
-	Finding    string
-	Source     store.Source
-	Scope      string
-	Repo       string
-	Confidence string
+	TargetID string
+	Finding  string
+	Source   store.Source
+	Scope    string
+	Repo     string
+	// Environment and Service name the subject of a finding scoped to one.
+	Environment string
+	Service     string
+	Confidence  string
 	// Supersedes names entries this finding replaces. See Entry.Supersedes.
 	Supersedes []string
 }
@@ -526,13 +542,36 @@ func (s *Service) LogFinding(req LogFindingRequest) (*store.Entry, error) {
 	if scope == "" {
 		scope = store.ScopeTask
 	}
+	switch scope {
+	case store.ScopeTask, store.ScopeProject, store.ScopeRepo, store.ScopeEnvironment, store.ScopeService:
+	default:
+		return nil, fmt.Errorf("scope %q is not one of task, project, repo, environment, service", scope)
+	}
 	if scope == store.ScopeRepo && strings.TrimSpace(req.Repo) == "" {
 		return nil, errors.New("scope is repo, so repo is required: a repo-scoped finding with no repo " +
 			"cannot be found again by the next task in that repository")
 	}
+	req.Environment, req.Service = strings.TrimSpace(req.Environment), strings.TrimSpace(req.Service)
+	for _, sub := range []store.Subject{{Kind: store.ScopeEnvironment, ID: req.Environment}, {Kind: store.ScopeService, ID: req.Service}} {
+		switch {
+		case sub.ID == "" && scope == sub.Kind:
+			return nil, fmt.Errorf("scope is %s, so %s is required: a finding about no %s in particular "+
+				"cannot be found again by the next piece of work that touches it", sub.Kind, sub.Kind, sub.Kind)
+		case sub.ID != "" && scope != sub.Kind:
+			// Refused rather than quietly re-scoped: an agent who named an
+			// environment and forgot the scope meant the finding to outlive the
+			// task, and a task-scoped default would silently lose it.
+			return nil, fmt.Errorf("%s is set but scope is %s: pass scope=%s for a finding about it", sub.Kind, scope, sub.Kind)
+		case sub.ID != "":
+			if err := store.ValidateSubject(sub.Kind, sub.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	entry := &store.Entry{
 		Kind: store.KindFinding, Scope: scope, Repo: req.Repo,
+		Environment: req.Environment, Service: req.Service,
 		Host: s.host(), Session: s.session(),
 		Source:     &req.Source,
 		Confidence: store.ResolveConfidence(req.Source.Kind, req.Confidence),
@@ -719,9 +758,11 @@ type ConsolidateRequest struct {
 	// TargetID is a task id or a project id.
 	TargetID string
 
-	// Repo, when set, targets that repository's note inside the target project
-	// instead of the project note itself.
-	Repo string
+	// Repo, Environment or Service, when one is set, targets that subject's
+	// page inside the target project instead of the project note itself.
+	Repo        string
+	Environment string
+	Service     string
 
 	// Body is the composed markdown. Written verbatim.
 	Body string
@@ -756,9 +797,9 @@ func (s *Service) Consolidate(req ConsolidateRequest) (string, error) {
 
 	// A task target.
 	if project, err := s.Store.FindTask(target); err == nil {
-		if req.Repo != "" {
-			return "", errors.New("repo is for folding a repository's findings, which belong to a " +
-				"project rather than a task — pass the project id as target_id")
+		if sub, err := req.subject(); err != nil || sub != nil {
+			return "", errors.New("repo, environment and service are for folding the findings about one, " +
+				"which belong to a project rather than a task — pass the project id as target_id")
 		}
 
 		// Record the fold before marking how far it reached, so the record is
@@ -781,18 +822,22 @@ func (s *Service) Consolidate(req ConsolidateRequest) (string, error) {
 		return "", fmt.Errorf("target %q is neither a known task nor a known project: %w", req.TargetID, err)
 	}
 
-	if repo := strings.TrimSpace(req.Repo); repo != "" {
+	sub, err := req.subject()
+	if err != nil {
+		return "", err
+	}
+	if sub != nil {
 		through, err := s.Store.NewestEntry(target, store.EntryFilter{
-			Scope: store.ScopeRepo, Repos: []string{repo},
+			Scope: sub.Kind, Subjects: []string{sub.ID},
 		})
 		if err != nil {
 			return "", err
 		}
-		if err := s.Store.ConsolidateRepo(target, repo, body, through, req.ExpectThrough, req.Checked); err != nil {
+		if err := s.Store.ConsolidateSubject(target, *sub, body, through, req.ExpectThrough, req.Checked); err != nil {
 			return "", err
 		}
-		s.recordConsolidation(target, "", "repo note for "+repo)
-		return s.Store.RepoNotePath(target, repo), nil
+		s.recordConsolidation(target, "", sub.Kind+" note for "+sub.ID)
+		return s.Store.SubjectNotePath(target, *sub), nil
 	}
 
 	through, err := s.Store.NewestEntry(target, store.EntryFilter{Scope: store.ScopeProject})
@@ -804,6 +849,31 @@ func (s *Service) Consolidate(req ConsolidateRequest) (string, error) {
 	}
 	s.recordConsolidation(target, "", "project "+target)
 	return s.Store.ProjectPath(target), nil
+}
+
+// subject returns the subject a consolidation targets, nil for none, and
+// refuses more than one: a page is about one thing.
+func (r ConsolidateRequest) subject() (*store.Subject, error) {
+	var found []store.Subject
+	for _, sub := range []store.Subject{
+		{Kind: store.ScopeRepo, ID: strings.TrimSpace(r.Repo)},
+		{Kind: store.ScopeEnvironment, ID: strings.TrimSpace(r.Environment)},
+		{Kind: store.ScopeService, ID: strings.TrimSpace(r.Service)},
+	} {
+		if sub.ID != "" {
+			found = append(found, sub)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return nil, nil
+	case 1:
+		if err := store.ValidateSubject(found[0].Kind, found[0].ID); err != nil {
+			return nil, err
+		}
+		return &found[0], nil
+	}
+	return nil, errors.New("set one of repo, environment and service: a page is about one thing")
 }
 
 // recordConsolidation appends a note entry saying a fold happened.

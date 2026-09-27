@@ -305,6 +305,20 @@ func (s *Store) Append(entry *Entry) (string, error) {
 			return "", err
 		}
 	}
+	for _, sub := range []Subject{{ScopeEnvironment, entry.Environment}, {ScopeService, entry.Service}} {
+		if sub.ID == "" {
+			if entry.Scope == sub.Kind {
+				return "", fmt.Errorf("scope is %s but no %s was given", sub.Kind, sub.Kind)
+			}
+			continue
+		}
+		if entry.Scope != sub.Kind {
+			return "", fmt.Errorf("%s is set but scope is %s: an entry names the subject of its own scope only", sub.Kind, entry.Scope)
+		}
+		if err := ValidateSubject(sub.Kind, sub.ID); err != nil {
+			return "", err
+		}
+	}
 
 	stamp, err := ParseTime(entry.TS)
 	if err != nil {
@@ -315,7 +329,7 @@ func (s *Store) Append(entry *Entry) (string, error) {
 	if subject == "" {
 		subject = entry.Project
 	}
-	entry.Parent, entry.RepoNote = s.entryLinks(entry)
+	entry.Parent, entry.RepoNote, entry.SubjectNote = s.entryLinks(entry)
 
 	data, err := vault.Render(entry, entry.Body)
 	if err != nil {
@@ -344,10 +358,15 @@ func (s *Store) Append(entry *Entry) (string, error) {
 
 // EntryFilter narrows a log query. Zero values mean "no constraint".
 type EntryFilter struct {
-	Task   string
-	Scope  string
-	Repos  []string
-	Kinds  []string
+	Task  string
+	Scope string
+	Repos []string
+	Kinds []string
+
+	// Subjects matches entries whose subject id is one of these, whatever the
+	// subject's kind. Pair it with Scope to ask for one kind.
+	Subjects []string
+
 	Since  time.Time
 	Latest bool
 
@@ -437,6 +456,12 @@ func matches(e *Entry, f EntryFilter) bool {
 			}
 		}
 		if !found {
+			return false
+		}
+	}
+	if len(f.Subjects) > 0 {
+		sub, ok := e.Subject()
+		if !ok || !containsFold(f.Subjects, sub.ID) {
 			return false
 		}
 	}
@@ -631,7 +656,8 @@ func (s *Store) Search(filter SearchFilter) ([]Match, error) {
 		if repo == "" || containsFold(note.Repos, repo) {
 			haystack := strings.ToLower(strings.Join(append([]string{
 				note.ID, note.Name, body,
-			}, append(append(append([]string{}, note.Repos...), note.JiraProjects...), note.GitLabGroups...)...), " "))
+			}, append(append(append(append(append([]string{}, note.Repos...), note.JiraProjects...),
+				note.GitLabGroups...), note.Environments...), note.Services...)...), " "))
 
 			why, snippet, ok := matchWhere(terms, haystack, projectScoped, "project")
 			if ok {

@@ -17,6 +17,8 @@
   {{if .Blocked}}<dt>Blocked</dt><dd>{{range .Blocked}}<a href="/project/{{$.Project.ID}}/task/{{.}}" data-node="task:{{$.Project.ID}}/{{.}}">{{.}}</a> {{end}}</dd>{{end}}
   {{if .Closed}}<dt>Closed</dt><dd class="muted">{{range .Closed}}<a href="/project/{{$.Project.ID}}/task/{{.}}" data-node="task:{{$.Project.ID}}/{{.}}">{{.}}</a> {{end}}</dd>{{end}}
   <dt>Repos</dt><dd>{{range .Project.Repos}}<a href="/log?repo={{.}}" data-node="repo:{{.}}">{{.}}</a><br>{{else}}<span class="muted">none listed</span>{{end}}</dd>
+  {{if .Project.Environments}}<dt>Environments</dt><dd>{{range .Project.Environments}}<a href="/log?environment={{.}}" data-node="environment:{{.}}">{{.}}</a><br>{{end}}</dd>{{end}}
+  {{if .Project.Services}}<dt>Services</dt><dd>{{range .Project.Services}}<a href="/log?service={{.}}" data-node="service:{{.}}">{{.}}</a><br>{{end}}</dd>{{end}}
 </dl>
 
 {{if .Issues}}<h3>Checks</h3>{{template "issuelist" .Issues}}{{end}}
@@ -59,10 +61,12 @@
 <p><a href="/project/{{.ProjectID}}/task/{{.Task.ID}}">Open the task →</a></p>
 {{end}}
 
-{{define "detail-repo"}}
-<div class="panel-kind">repository</div>
-<h2 class="panel-title"><a href="/log?repo={{.Repo}}">{{.Repo}}</a></h2>
-<p class="muted">{{plural .Findings "repo-scoped finding"}} across {{plural (len .Projects) "project"}}</p>
+{{/* A repo, an environment or a service: .Kind is the scope, which is also
+     the graph node kind, the log filter and the page's path segment. */}}
+{{define "detail-subject"}}
+<div class="panel-kind">{{.Noun}}</div>
+<h2 class="panel-title"><a href="/log?{{.Kind}}={{.ID}}">{{.ID}}</a></h2>
+<p class="muted">{{plural .Findings (printf "%s-scoped finding" .Kind)}} across {{plural (len .Projects) "project"}}</p>
 
 <table class="panel-table">
   <thead><tr><th>Project</th><th>Findings</th><th>Note</th><th>Tasks</th></tr></thead>
@@ -71,7 +75,7 @@
     <tr>
       <td><a href="/project/{{.Project}}" data-node="project:{{.Project}}">{{.Project}}</a>{{if not .Listed}}<br><span class="warn">not listed</span>{{end}}</td>
       <td>{{.Findings}}</td>
-      <td>{{if .Consolidated}}<a href="/project/{{.Project}}/repo/{{$.Repo}}">yes</a>{{else}}<span class="muted">no</span>{{end}}</td>
+      <td>{{if .Consolidated}}<a href="/project/{{.Project}}/{{$.Kind}}/{{$.ID}}">yes</a>{{else}}<span class="muted">no</span>{{end}}</td>
       <td>{{$p := .Project}}{{range .Tasks}}<a href="/project/{{$p}}/task/{{.}}" data-node="task:{{$p}}/{{.}}">{{.}}</a> {{else}}<span class="muted">—</span>{{end}}</td>
     </tr>
   {{end}}
@@ -82,13 +86,13 @@
 
 <h3>Latest findings</h3>
 {{template "entrylist" .Recent}}
-<p><a href="/log?repo={{.Repo}}">Every entry about this repo →</a></p>
+<p><a href="/log?{{.Kind}}={{.ID}}">Every entry about this {{.Noun}} →</a></p>
 {{end}}
 
 {{define "detail-entry"}}
 <div class="panel-kind">log entry</div>
 {{range .Entry}}
-<p class="muted">in <a href="/project/{{$.ProjectID}}" data-node="project:{{$.ProjectID}}">{{$.ProjectID}}</a>{{if .Task}} · task <a href="/project/{{$.ProjectID}}/task/{{.Task}}" data-node="task:{{$.ProjectID}}/{{.Task}}">{{.Task}}</a>{{end}}{{if .Repo}} · repo <a href="/log?repo={{.Repo}}" data-node="repo:{{.Repo}}">{{.Repo}}</a>{{end}}</p>
+<p class="muted">in <a href="/project/{{$.ProjectID}}" data-node="project:{{$.ProjectID}}">{{$.ProjectID}}</a>{{if .Task}} · task <a href="/project/{{$.ProjectID}}/task/{{.Task}}" data-node="task:{{$.ProjectID}}/{{.Task}}">{{.Task}}</a>{{end}}{{if .Repo}} · repo <a href="/log?repo={{.Repo}}" data-node="repo:{{.Repo}}">{{.Repo}}</a>{{end}}{{if .Environment}} · environment <a href="/log?environment={{.Environment}}" data-node="environment:{{.Environment}}">{{.Environment}}</a>{{end}}{{if .Service}} · service <a href="/log?service={{.Service}}" data-node="service:{{.Service}}">{{.Service}}</a>{{end}}</p>
 {{end}}
 {{template "entrylist" .Entry}}
 <p class="muted"><code>{{.File}}</code></p>
