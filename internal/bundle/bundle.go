@@ -13,6 +13,7 @@ package bundle
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -33,6 +34,11 @@ type Marked struct {
 	Entry  *store.Entry
 	Stale  bool
 	Reason string
+
+	// From is the project the entry was read from, set only when that is not
+	// the bundle's own. Taken from the folder, not the entry's frontmatter,
+	// because the folder is where supersedes has to be sent.
+	From string
 }
 
 // TaskBundle is what open_task returns.
@@ -68,6 +74,13 @@ type TaskBundle struct {
 	// the system exists.
 	ProjectFindings []Marked
 	RepoFindings    map[string][]Marked
+
+	// ElsewhereFindings are repo-scoped findings about the task's repositories
+	// that other projects logged. A repository id names one repository
+	// wherever it appears, so what another workstream learned there is as true
+	// here. Kept apart from RepoFindings because many are pinned to a moment,
+	// or say "this project", that belonged to the project that wrote them.
+	ElsewhereFindings map[string][]Marked
 }
 
 // ProjectBundle is what open_project returns.
@@ -77,6 +90,10 @@ type ProjectBundle struct {
 	Created     bool
 	Findings    []Marked
 	RepoNotes   map[string][]Marked
+
+	// ElsewhereNotes are the project's repositories as other projects know
+	// them. See TaskBundle.ElsewhereFindings.
+	ElsewhereNotes map[string][]Marked
 
 	// OpenTasks are the ones that can be started now.
 	OpenTasks []string
@@ -176,6 +193,10 @@ func (a *Assembler) Task(project, taskID string) (*TaskBundle, error) {
 		}
 	}
 
+	if b.ElsewhereFindings, err = a.elsewhere(project, note.Repos); err != nil {
+		return nil, err
+	}
+
 	return b, nil
 }
 
@@ -208,6 +229,10 @@ func (a *Assembler) Project(projectID string) (*ProjectBundle, error) {
 		}
 	}
 
+	if b.ElsewhereNotes, err = a.elsewhere(projectID, note.Repos); err != nil {
+		return nil, err
+	}
+
 	// Open tasks: every task note with no closed entry. Derived, never stored —
 	// a stored status drifts, and this costs one directory walk.
 	graph, err := a.Store.DependencyGraph(projectID)
@@ -233,6 +258,45 @@ func (a *Assembler) Project(projectID string) (*ProjectBundle, error) {
 	sort.Slice(b.BlockedTasks, func(i, j int) bool { return b.BlockedTasks[i].ID < b.BlockedTasks[j].ID })
 
 	return b, nil
+}
+
+// elsewhere collects the repo-scoped findings about repos that every project
+// other than this one has logged, keyed by the repo as this project spells it.
+//
+// Only reads move. Each entry stays in the project that wrote it, so nothing
+// here weakens append-only; it is the same fold-on-read as amendments.
+func (a *Assembler) elsewhere(project string, repos []string) (map[string][]Marked, error) {
+	out := map[string][]Marked{}
+	if len(repos) == 0 {
+		return out, nil
+	}
+	projects, err := a.Store.ListProjects()
+	if err != nil {
+		return nil, err
+	}
+	for _, other := range projects {
+		if other == project {
+			continue
+		}
+		entries, err := a.Store.Entries(other, store.EntryFilter{
+			Scope: store.ScopeRepo, Repos: repos, Kinds: []string{store.KindFinding},
+		})
+		if err != nil {
+			// Another project's broken folder must not take out this bundle.
+			slog.Warn("skipping unreadable project log", "project", other, "err", err)
+			continue
+		}
+		for i, m := range a.mark(entries) {
+			m.From = other
+			for _, repo := range repos {
+				if strings.EqualFold(repo, entries[i].Repo) {
+					out[repo] = append(out[repo], m)
+					break
+				}
+			}
+		}
+	}
+	return out, nil
 }
 
 // mark applies the staleness rules.
@@ -354,8 +418,10 @@ func (b *TaskBundle) Render() string {
 	for _, repo := range repos {
 		renderSection(&out, "What we know about "+repo, b.RepoFindings[repo], false)
 	}
+	renderElsewhere(&out, b.ElsewhereFindings)
 
-	if len(b.Unconsolidated) == 0 && len(b.ProjectFindings) == 0 && len(b.RepoFindings) == 0 {
+	if len(b.Unconsolidated) == 0 && len(b.ProjectFindings) == 0 && len(b.RepoFindings) == 0 &&
+		len(b.ElsewhereFindings) == 0 {
 		out.WriteString("\n## Nothing recorded yet\n\n" +
 			"This project has no findings. That is expected on the first task in a project — " +
 			"the value builds from the second one onward. Log what you learn as you go.\n")
@@ -413,6 +479,7 @@ func (b *ProjectBundle) Render() string {
 	for _, repo := range repos {
 		renderSection(&out, "What we know about "+repo, b.RepoNotes[repo], false)
 	}
+	renderElsewhere(&out, b.ElsewhereNotes)
 
 	if len(b.OpenTasks) > 0 {
 		out.WriteString("\n## Ready to start\n\n")
@@ -436,6 +503,26 @@ func (b *ProjectBundle) Render() string {
 	return out.String()
 }
 
+// renderElsewhere renders what other projects know about a bundle's repos, one
+// section per repo, each entry marked with the project it came from.
+func renderElsewhere(out *strings.Builder, byRepo map[string][]Marked) {
+	repos := make([]string, 0, len(byRepo))
+	for repo := range byRepo {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	for _, repo := range repos {
+		renderSection(out, "What other projects know about "+repo, byRepo[repo], false)
+	}
+	if len(repos) > 0 {
+		// Said once, after the sections, where the question comes up.
+		out.WriteString("\nThose were logged by other projects working in the same repositories. " +
+			"\"This project\" in one of them means the project it came from, and a commit or " +
+			"branch it names was current there, then. To replace one that is wrong, log_finding " +
+			"with target_id set to that project and supersedes set to its id.\n")
+	}
+}
+
 func renderSection(out *strings.Builder, heading string, items []Marked, showKind bool) {
 	if len(items) == 0 {
 		return
@@ -455,6 +542,9 @@ func renderSection(out *strings.Builder, heading string, items []Marked, showKin
 		}
 
 		var meta []string
+		if m.From != "" {
+			meta = append(meta, "from project "+m.From)
+		}
 		meta = append(meta, e.TS)
 		if e.Source != nil && e.Source.Kind != "" {
 			ref := e.Source.Kind

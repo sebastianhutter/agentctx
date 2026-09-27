@@ -96,6 +96,11 @@ The field the system turns on.
 A finding that would help someone who has never heard of the task is not
 task-scoped. When in doubt, the wider scope is the better guess.
 
+A repo-scoped finding is written to the project whose task found it, but read
+by every project that works in the repository: `open_task` and `open_project`
+show other projects' findings about the same repos under their own heading,
+marked with the project they came from.
+
 ### Confidence
 
 Derived from `source.kind`, because a model asked to rate its own certainty rates

@@ -220,3 +220,103 @@ func rewrite(t *testing.T, s *store.Store, note *store.TaskNote) {
 		t.Fatalf("rewrite task note: %v", err)
 	}
 }
+
+func TestRepoFindingsFromOtherProjects(t *testing.T) {
+	s, a := setup(t)
+	if err := s.CreateProject(&store.ProjectNote{
+		ID: "other", Name: "Another workstream", Repos: []string{"acme/infrastructure"},
+	}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+
+	appendEntry := func(e *store.Entry) string {
+		t.Helper()
+		path, err := s.Append(e)
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		return path
+	}
+	src := &store.Source{Kind: store.SourceFile, Ref: "modules/network/main.tf@abc1234", Retrieved: "2026-09-19"}
+	appendEntry(&store.Entry{Kind: store.KindFinding, Project: "proj", Scope: store.ScopeRepo, Repo: "acme/infrastructure",
+		TS: "2026-09-19T14:00:00", Body: "own repo fact", Source: src})
+	// Spelled differently: repo ids match case-insensitively, as within a project.
+	appendEntry(&store.Entry{Kind: store.KindFinding, Project: "other", Scope: store.ScopeRepo, Repo: "Acme/Infrastructure",
+		TS: "2026-09-19T14:01:00", Body: "fact learned elsewhere", Source: src})
+	old := appendEntry(&store.Entry{Kind: store.KindFinding, Project: "other", Scope: store.ScopeRepo, Repo: "acme/infrastructure",
+		TS: "2026-09-19T14:02:00", Body: "replaced fact elsewhere", Source: src})
+	appendEntry(&store.Entry{Kind: store.KindFinding, Project: "other", Scope: store.ScopeRepo, Repo: "acme/infrastructure",
+		TS: "2026-09-19T14:03:00", Body: "replacement elsewhere", Source: src,
+		Supersedes: []string{store.EntryID(old)}})
+	appendEntry(&store.Entry{Kind: store.KindFinding, Project: "other", Scope: store.ScopeRepo, Repo: "acme/tools",
+		TS: "2026-09-19T14:04:00", Body: "fact about an untouched repo", Source: src})
+	appendEntry(&store.Entry{Kind: store.KindFinding, Project: "other", Scope: store.ScopeProject,
+		TS: "2026-09-19T14:05:00", Body: "the other project's own fact", Source: src})
+
+	b, err := a.Task("proj", "proj-142")
+	if err != nil {
+		t.Fatalf("Task: %v", err)
+	}
+	if got := b.RepoFindings["acme/infrastructure"]; len(got) != 1 || got[0].From != "" {
+		t.Errorf("own repo findings = %v, want the one own entry, unmarked", got)
+	}
+	got := b.ElsewhereFindings["acme/infrastructure"]
+	if len(got) != 2 {
+		t.Fatalf("findings from elsewhere = %d, want 2 (the replaced one dropped)", len(got))
+	}
+	for _, m := range got {
+		if m.From != "other" {
+			t.Errorf("From = %q, want other", m.From)
+		}
+	}
+
+	out := b.Render()
+	for _, want := range []string{
+		"## What other projects know about acme/infrastructure",
+		"fact learned elsewhere", "replacement elsewhere", "from project other",
+		"target_id set to that project",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered bundle is missing %q", want)
+		}
+	}
+	for _, leak := range []string{"replaced fact elsewhere", "untouched repo", "the other project's own fact"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("rendered bundle leaked %q", leak)
+		}
+	}
+	if strings.Count(out, "own repo fact") != 1 {
+		t.Error("the task's own repo finding should appear exactly once")
+	}
+
+	pb, err := a.Project("proj")
+	if err != nil {
+		t.Fatalf("Project: %v", err)
+	}
+	if len(pb.ElsewhereNotes["acme/infrastructure"]) != 2 {
+		t.Errorf("project bundle elsewhere = %v, want 2 for acme/infrastructure", pb.ElsewhereNotes)
+	}
+	if !strings.Contains(pb.Render(), "What other projects know about acme/infrastructure") {
+		t.Error("project bundle does not render findings from other projects")
+	}
+}
+
+func TestOnlyElsewhereFindingsIsNotNothing(t *testing.T) {
+	s, a := setup(t)
+	if err := s.CreateProject(&store.ProjectNote{ID: "other", Name: "Another workstream"}); err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	if _, err := s.Append(&store.Entry{Kind: store.KindFinding, Project: "other", Scope: store.ScopeRepo,
+		Repo: "acme/infrastructure", TS: "2026-09-19T14:00:00", Body: "fact learned elsewhere",
+		Source: &store.Source{Kind: store.SourceFile, Ref: "x@1", Retrieved: "2026-09-19"}}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	b, err := a.Task("proj", "proj-142")
+	if err != nil {
+		t.Fatalf("Task: %v", err)
+	}
+	b.Unconsolidated = nil // the opened entry is not what this test is about
+	if out := b.Render(); strings.Contains(out, "Nothing recorded yet") {
+		t.Error("a bundle with findings from other projects claims nothing is recorded")
+	}
+}
