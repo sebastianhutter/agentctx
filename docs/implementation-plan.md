@@ -838,8 +838,8 @@ The test a new kind has to pass is the one repositories pass:
    repositories.
 
 - **Environment — yes.** In the same audit, roughly a third of the durable
-  findings mention staging or production; they are filed under the nearest
-  scope that exists. What is recorded is what was *learned* about an
+  findings mention staging or production. (That was a keyword count, and it
+  overstated the case — see "Measured afterwards" below.) What is recorded is what was *learned* about an
   environment, never an inventory of it: live state is what `status` was, and
   under D4 nothing is fetched. The id is **not** global — every project has a
   `prod` — so an environment stays project-local.
@@ -885,3 +885,15 @@ Settled while building it:
   real: rendered in full, one bundle went from 14 KB to 107 KB. They now show
   their first 160 characters, and `open_project` on the project named under
   one gives the whole text.
+
+Measured afterwards, by reading every one of the 316 durable findings in the
+vault rather than grepping them: **17** were chiefly about an environment or a
+service — 4 environments, 13 services, most of them the behaviour of a cloud
+provider's product. The rest mention a stage while being about a
+repository's code, a pipeline or the plan, and stay where they are. So the
+keyword count was wrong about the past, and the case for the kinds rests on
+two other things: **listing** — the survey proposed 14 environments and 20
+services, 8 of them shared by two to five projects, each of which now reaches
+every project that lists it — and the findings still to be written, which
+until now had no scope to go to. The 17 were re-scoped by superseding, and the
+lists added by `amend_project`, both through the verbs.
