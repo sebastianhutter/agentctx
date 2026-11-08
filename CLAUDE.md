@@ -17,9 +17,9 @@ before writing code.
 
 ## Rule 0 — this repository names no customer, project or person
 
-**The repository is private today and may be made public later. Git history is
-permanent: scrubbing a name before flipping visibility does not remove it.**
-Therefore the rule applies from the first commit, not from the day it goes public.
+**The repository is public. Git history is permanent: a name removed in a later
+commit is still readable by anyone.** The rule has applied from the first commit,
+and the history was checked against it before visibility was flipped.
 
 Never write into code, tests, fixtures, doc comments, `docs/`, `configs/`,
 `README.md`, branch names or commit messages:
@@ -53,13 +53,11 @@ Nothing enforces this automatically. It is a rule you and any agent working here
 follow while writing, which means the moment to apply it is **before** the text
 exists, not in a review pass afterwards.
 
-**Before making this repository public**, read every tracked file once with this
-rule in mind, and grep the working tree and `git log -p` for the names you know
-are yours — your employer, your customers, their products, their issue-key
-prefixes, their tracker hostnames, your own name and mail addresses. History
-counts: a name removed in a later commit is still in the repository. If one turns
-up, rewriting history (or starting a fresh repository from the current tree) is
-the only real fix.
+**Before pushing**, grep what you are about to push — the diff and the commit
+messages — for the names you know are yours: your employer, your customers, their
+products, their issue-key prefixes, their tracker hostnames. Once a name is on
+the public remote, rewriting history no longer recalls it: forks, clones and
+caches already have it.
 
 Aggregate measurements are welcome and are what makes documentation useful — "a
 project accumulated 40 findings over two weeks" is fine. The identities behind
