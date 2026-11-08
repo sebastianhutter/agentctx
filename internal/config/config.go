@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	// DefaultConfigDir also holds bindings.json and the private deny-list. It is
+	// DefaultConfigDir also holds bindings.json. It is
 	// deliberately outside the vault: nothing here may be synced.
 	DefaultConfigDir  = filepath.Join(homeDir(), ".agentctx")
 	DefaultConfigPath = filepath.Join(DefaultConfigDir, "config.json")

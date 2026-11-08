@@ -34,10 +34,9 @@ repositories, plus the working agreement.
 This is what a SessionStart hook should call. Its output goes to stdout so the
 hook can inject it into the session; logging goes to stderr.
 
-The task id is resolved from the argument, then from a binding recorded by an
-earlier open-task in this worktree or Kepler task, then from a tracker key in the
-branch name. A branch named after a task title carries no key, so pass the id
-when you know it.`,
+The task id is required, as the argument or --task. It is never inferred from
+the working directory or the branch name: a wrong guess files entries under the
+wrong task with nothing looking wrong.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		svc, err := newService()

@@ -31,7 +31,8 @@ bundle back. The system pays off from the second one onward.
 
 ## Install
 
-macOS only. Download the DMG from the releases page, drag agentctx to
+macOS only (Apple silicon). Download the DMG from the
+[releases page](https://github.com/sebastianhutter/agentctx/releases), drag agentctx to
 Applications, and open it from the context menu the first time — it is not
 notarised, so a plain double-click is refused.
 
@@ -115,6 +116,114 @@ difference worth knowing: a shared server cannot see any caller's environment,
 so the host recorded on an entry comes from the MCP client's own name rather
 than from detection. Task ids are required either way.
 
+## Making agents use it
+
+Registering the server makes the tools available. It does not make an agent
+reach for them: an agent that is never told the vault exists will read the code
+from scratch, and one that is never told to log will finish the task with
+nothing written down. Two pieces close that gap, and they work best together.
+
+### 1. A standing instruction
+
+Put this in `~/.claude/CLAUDE.md` so it applies to every session on the machine,
+or in a repository's `CLAUDE.md` / `AGENTS.md` to scope it to one codebase:
+
+```markdown
+## agentctx
+
+agentctx is my knowledge base for work across repositories. It holds what
+earlier sessions decided and found out, per task, repository, environment,
+service and project.
+
+- At the start of any task, before reading code, call `open_task` with the
+  task id. If you do not know the id, call `find` (no arguments lists
+  everything, `repo` narrows to this repository). For a task agentctx has not
+  seen, look the issue up with your tracker tools and pass its title and URL
+  as the seed. If the work has no ticket, use a short id of your own and
+  `source: manual`.
+- Never guess the task id from the branch or directory. If `find` does not
+  make it obvious, ask me.
+- Log while you work, not at the end: `log_decision` when you choose between
+  options, `log_finding` when you look something up and confirm it. Scope a
+  finding to the narrowest thing it is true of — `repo`, `environment`,
+  `service` or `project`. Use `task` only for what dies with the task.
+- When asked about a project rather than a task, call `open_project`.
+- Before finishing, `consolidate` the task, then `close_task` with a summary.
+```
+
+Adjust it to taste. The parts worth keeping are *before reading code*, *never
+guess the id* and *log while you work*: those are where an agent goes wrong
+without being told.
+
+### 2. A SessionStart hook
+
+A standing instruction is read once and competes with everything else in
+context. A hook puts what is actually recorded about *this* repository in front
+of the session at the moment it starts, which is what makes `open_task` the
+obvious first call.
+
+[`examples/claude-code/agentctx-session-start.sh`](examples/claude-code/agentctx-session-start.sh)
+looks up the repository from its `origin` remote, asks agentctx what it knows
+about it, and prints that with a short reminder. It prints nothing for a
+repository agentctx has never seen and never fails a session.
+
+```bash
+mkdir -p ~/.claude/hooks
+cp examples/claude-code/agentctx-session-start.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/agentctx-session-start.sh
+```
+
+Then register it in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/agentctx-session-start.sh",
+            "timeout": 10,
+            "statusMessage": "Checking agentctx for this repository..."
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook deliberately does not open a task. Which task a session is working on
+is an argument the agent passes, never something inferred from a directory — see
+*The task is named, never inferred* below.
+
+### Inside Kepler
+
+[Kepler](docs/kepler-integration.md) runs each task in its own worktree and
+generates a `CLAUDE.md` listing the task's repositories and links. The standing
+instruction and the hook above work there unchanged. Registered over stdio,
+agentctx detects Kepler sessions on its own, so entries are attributed to
+`kepler-claude-code` rather than plain `claude-code`. A useful addition for
+Kepler users:
+
+```markdown
+- Inside Kepler, use Kepler's task notes for in-flight state this week, and
+  agentctx for anything worth knowing after the task is archived. Pass the
+  repositories Kepler lists for the task into the `open_task` seed.
+```
+
+[`docs/kepler-integration.md`](docs/kepler-integration.md) has the details.
+
+### Other hosts
+
+Any MCP host works — the tools carry their own instructions, and the working
+agreement comes back with every `open_task`, so the rules travel with the tool
+rather than with a host-specific file. Put the standing instruction wherever the
+host reads one: an `AGENTS.md`, a system prompt, a rules file. Set `AGENT_HOST`
+in the server's environment, or `host` in the config, if the host is not
+detected and you want entries attributed to it.
+
 ## Web interface
 
 `http://localhost:31125/` — projects, tasks, repository notes, a graph, the
@@ -193,7 +302,15 @@ logged against it, so `open_task` says so once entries pile up.
 - [`docs/implementation-plan.md`](docs/implementation-plan.md) — design, decisions and build order
 - [`docs/vault-schema.md`](docs/vault-schema.md) — frontmatter contracts and entry shape
 - [`docs/enforcement.md`](docs/enforcement.md) — why required fields and refusals, and what is deliberately not enforced
-- [`CLAUDE.md`](CLAUDE.md) — working rules for this repository
+- [`docs/kepler-integration.md`](docs/kepler-integration.md) — what changes when the agent runs inside Kepler
+- [`CLAUDE.md`](CLAUDE.md) — working rules for this repository, for people and agents alike
+
+## Contributing
+
+Issues and pull requests are welcome. Read [`CLAUDE.md`](CLAUDE.md) first: it
+holds the design constraints a change has to respect, and Rule 0 — no real
+customer, project or person names anywhere in the repository, including tests
+and commit messages. `make test` runs the suite against a temporary vault.
 
 ## Licence
 

@@ -31,7 +31,7 @@ them — that is the point.
 
 Run with no arguments to start the menu bar app, which runs the MCP server for
 every client to share. Run "agentctx serve" for a stdio server instead, one per
-host, which can work out which task it is being asked about.`,
+host, which can tell which host is calling from the environment it inherits.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return gui.Run(configPath, version)
 	},
